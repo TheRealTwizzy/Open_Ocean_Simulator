@@ -4,6 +4,11 @@ An interactive, single-file simulation of deep-ocean rogue wave formation throug
 **constructive interference** (linear focusing). Open `index.html` in any modern
 browser — no build step, no network, no dependencies.
 
+Two views, toggleable in the header: a **3D ocean surface** (hand-rolled WebGL,
+wave sum evaluated in the vertex shader; drag to rotate) and the original
+**2D cross-section**, where the resulting sea state is visibly the sum of the
+two train lines.
+
 ## What it shows
 
 Two storm wave trains (A and B) cross the same stretch of ocean at different
@@ -27,9 +32,17 @@ towering crest: a rogue wave.
   convergence point is highlighted, and the simulation can auto-freeze briefly
   so you can inspect it.
 
+Each train also has a **direction (heading)** slider. Pointing the trains along
+different headings creates **crossing seas** — two wave systems whose crest
+lines only fully reinforce where they intersect. Crossing wind-sea and swell is
+a documented real-world rogue mechanism and the leading hypothesis for the
+Draupner wave; in the 3D view, crests climbing above the H<sub>s</sub>
+elevation glow orange, and rogue events drop a pulsing beacon at the
+convergence point.
+
 ## Controls
 
-- Per-train sliders: amplitude, central frequency, propagation speed.
+- Per-train sliders: amplitude, central frequency, propagation speed, direction.
 - Global time step / speed multiplier (0–8×), pause (space bar), reset.
 - Toggleable physics sidebar with a reactive tip that responds to your slider
   settings (beats, non-lapping groups, near-rogue conditions, …).
