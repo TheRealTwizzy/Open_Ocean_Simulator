@@ -282,6 +282,11 @@ export class Ocean {
     // baked cube map is a render target whose contents are simply gone
     this.needsRebake = false;
     canvas.addEventListener('webglcontextrestored', () => { this.needsRebake = true; });
+    // three re-creates its geometry bookkeeping on restore but leaves the old
+    // one's dispose listener on the geometry, so setQuality's dispose() would
+    // delete buffers of the dead context. Disposing while lost detaches it (the
+    // deletes are no-ops then); the restored context re-uploads the grid.
+    canvas.addEventListener('webglcontextlost', () => this.mesh.geometry.dispose());
 
     const sun = new THREE.DirectionalLight(0xfff1dc, 2.2);
     sun.position.copy(this.sunDir).multiplyScalar(1000);
