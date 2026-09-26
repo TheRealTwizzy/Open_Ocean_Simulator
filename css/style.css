@@ -422,7 +422,9 @@ input[type="range"]::-moz-range-thumb {
   .buoy-readout { top: 90px; left: auto; right: 16px; width: 246px; padding-bottom: 8px; }
   .hint { display: none; }
   .drawer { height: 150px; }
-  .nogl { top: 12px; padding: 10px 14px; }
+  /* the free corner beside the dock, below the drawer: the top belongs to the brand and stats */
+  .nogl { top: auto; bottom: var(--dock-bottom); left: 16px; transform: none; width: 118px; padding: 8px 10px; }
+  .nogl h2 { font-size: 13px; margin: 0; }
   .nogl p { display: none; }
 }
 
