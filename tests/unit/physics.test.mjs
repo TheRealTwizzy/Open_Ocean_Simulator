@@ -65,6 +65,76 @@ test('default sea fires exactly 14 events in 1200 s (15 s sea-time cooldown)', {
   assert.equal(count, 14);
 });
 
+// Records the sea times a Detector scans (scanInterval calls this.detect).
+function spyDetect(det) {
+  const calls = [], detect = det.detect.bind(det);
+  det.detect = t => { calls.push(t); return detect(t); };
+  return calls;
+}
+
+test('scanInterval catches a rogue window that two detect() calls 0.26 s apart both miss', () => {
+  // At 8x time speed the frame loop scans ~0.26 s of sea time apart. Find a
+  // ratio >= 2 window on the ?q=low default sea by 0.01 s sampling (the
+  // shortest, ~0.1 s, is near 860.4 s) that falls between two such scans.
+  const sea = defaultSea('low');
+  const det = new Detector(sea, 8);
+  const ratio = t => det.detect(t).Hmax / sea.Hs;
+  const gap = 0.26;
+  let pair = null;
+  for (let i = 0; i <= 2000 && !pair; i++) {
+    const tw = 850 + i / 100;
+    if (ratio(tw) < 2) continue;
+    const t0 = Math.floor(tw / gap) * gap, t1 = t0 + gap;
+    if (ratio(t0) < 2 && ratio(t1) < 2) pair = { tw, t0, t1 };
+  }
+  assert.ok(pair, 'a rogue window between two missed scans in 850..870 s');
+  const { tw, t0, t1 } = pair;
+  assert.ok(t0 < tw && tw < t1);
+
+  const { best } = det.scanInterval(t0, t1);
+  assert.ok(best.Hmax / sea.Hs >= 2, `sub-steps catch the window at ${tw.toFixed(2)} s (best ratio ${(best.Hmax / sea.Hs).toFixed(4)})`);
+  assert.ok(best.t > t0 && best.t <= t1, `best.t ${best.t} inside (${t0}, ${t1}]`);
+});
+
+test('scanInterval: the last scan is detect(t1), stamped with t1', () => {
+  const det = new Detector(defaultSea('low'), 8);
+  for (const [t0, t1] of [[10, 10.26], [100, 100.4], [3, 3.05], [0, 50]]) {
+    const { best, last } = det.scanInterval(t0, t1);
+    const { t, ...scan } = last;
+    assert.equal(t, t1);
+    assert.deepEqual(scan, det.detect(t1), `last scan of (${t0}, ${t1}]`);
+    assert.ok(best.Hmax >= last.Hmax);
+  }
+});
+
+test('scanInterval: t1 <= t0 (paused, or time reset) scans t1 once', () => {
+  const det = new Detector(defaultSea('low'), 8);
+  for (const [t0, t1] of [[5, 5], [19.64, 19.64], [120, 0.04], [120, 120 - 1e-9]]) {
+    const calls = spyDetect(det);
+    const { best, last } = det.scanInterval(t0, t1);
+    assert.deepEqual(calls, [t1], `(${t0}, ${t1})`);
+    assert.equal(best, last);
+    assert.equal(last.t, t1);
+  }
+});
+
+test('scanInterval never exceeds maxSteps and spaces its scans evenly up to t1', () => {
+  const det = new Detector(defaultSea('low'), 8);
+  for (const [maxGap, maxSteps] of [[undefined, undefined], [0.05, 3], [0.2, 10]]) {
+    const cap = maxSteps ?? 6, g = maxGap ?? 0.08;
+    for (const span of [0.001, 0.05, 0.079, 0.1, 0.26, 0.4, 0.47, 0.5, 1, 30, 1e4]) {
+      const t0 = 40, t1 = t0 + span;
+      const calls = spyDetect(det);
+      det.scanInterval(t0, t1, maxGap, maxSteps);
+      const n = calls.length, where = `span ${span}, maxGap ${g}, maxSteps ${cap}`;
+      assert.ok(n >= 1 && n <= cap, `${where}: ${n} scans`);
+      assert.equal(n, Math.min(Math.ceil((t1 - t0) / g), cap), where);
+      assert.equal(calls[n - 1], t1, `${where}: ends at t1`);
+      calls.forEach((t, i) => close(t - t0, span * (i + 1) / n, 1e-9 * t1, `${where}, scan ${i}:`));
+    }
+  }
+});
+
 test('a lone train focuses to its amplitude at (x0, y0, tf)', () => {
   for (const dispersion of [true, false]) {
     for (let i = 0; i < MAX_TRAINS; i++) {

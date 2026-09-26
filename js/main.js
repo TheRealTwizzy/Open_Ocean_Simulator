@@ -171,7 +171,7 @@ ui.updateStats(0, 0);
 window.addEventListener('resize', () => ocean && ocean.resize());
 
 let lastWall = performance.now();
-let lastDetect = 0, tipTimer = 0;
+let lastDetect = 0, lastScanSim = 0, tipTimer = 0;
 
 function frame(wallNow) {
   const dt = Math.min((wallNow - lastWall) / 1000, 0.05);
@@ -181,16 +181,27 @@ function frame(wallNow) {
   const frozen = wallNow < state.freezeUntil;
   ui.setFrozen(frozen);
   if (state.running && !frozen) state.simTime += dt * state.timeScale;
-  const t = state.simTime;
+  let t = state.simTime;
 
   if (wallNow - lastDetect >= DETECT_MS) {
     lastDetect = wallNow;
-    const best = detector.detect(t);
-    state.Hmax = best.Hmax;
-    state.ratio = sea.Hs > 0 ? best.Hmax / sea.Hs : 0;
+    // the stats show the sea at t; the trigger sees every sub-step since the last
+    // scan. Frames advance at most ~0.7 s of sea time between scans (8x), so a
+    // longer gap is a jump written to state.simTime and only t is scanned.
+    const from = t - lastScanSim <= 1 ? lastScanSim : t;
+    const { best, last } = detector.scanInterval(from, t);
+    lastScanSim = t;
+    let shown = last;
+    const ratio = sea.Hs > 0 ? best.Hmax / sea.Hs : 0;
     // the sim-time gap keeps a static sea (time speed 0) from re-counting one wave every cooldown
-    const advanced = !state.lastEvent || t - state.lastEvent.sim > 1;
-    if (state.ratio >= ROGUE_RATIO && wallNow > state.cooldownUntil && state.running && !frozen && advanced) triggerRogue(best, state.ratio, wallNow, t);
+    const advanced = !state.lastEvent || best.t - state.lastEvent.sim > 1;
+    if (ratio >= ROGUE_RATIO && wallNow > state.cooldownUntil && state.running && !frozen && advanced) {
+      triggerRogue(best, ratio, wallNow, best.t);
+      // freeze on the sub-step that fired, so the sea and stats match the alert and beacon
+      if (state.autoFreeze) { t = lastScanSim = state.simTime = best.t; shown = best; }
+    }
+    state.Hmax = shown.Hmax;
+    state.ratio = sea.Hs > 0 ? shown.Hmax / sea.Hs : 0;
     ui.updateStats(state.Hmax, state.ratio);
   }
 

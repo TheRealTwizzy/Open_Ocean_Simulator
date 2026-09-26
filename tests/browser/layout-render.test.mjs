@@ -280,24 +280,45 @@ test('375x812: nothing spills sideways, and every popover opens as a full-width 
   }
 });
 
-test('375x812: dock tooltips stay on screen when shown', { ...T, todo: 'app bug: the outermost dock tooltips are clipped at phone widths (Pause reaches x < 0, 2D view past innerWidth)' }, async () => {
+test('375x812 and 390x844: dock tooltips stay on screen when shown', T, async () => {
   const page = await newPage(browser, { width: 375, height: 812 });
   try {
     await open(page, server.url, '?q=low');
-    await settle(page);
     const spill = [];
-    const n = await page.locator('#dock .dock-btn').count();
-    for (let i = 0; i < n; i++) {
-      await page.locator('#dock .dock-btn').nth(i).hover({ force: true });
-      await page.waitForFunction(k => getComputedStyle(document.querySelectorAll('#dock .dock-btn')[k].nextElementSibling).opacity === '1',
-        i, { timeout: 30_000, polling: 50 });
-      const tip = await page.evaluate(k => {
-        const t = document.querySelectorAll('#dock .dock-btn')[k].nextElementSibling, r = t.getBoundingClientRect();
-        return { text: t.textContent.trim(), l: r.left, r: r.right, W: innerWidth };
-      }, i);
-      if (tip.l < -0.5 || tip.r > tip.W + 0.5) spill.push(`"${tip.text}" spans x ${tip.l.toFixed(1)}..${tip.r.toFixed(1)} of ${tip.W}`);
+    for (const [w, h] of [[375, 812], [390, 844]]) {
+      if (w !== 375) await setViewport(page, w, h);
+      await settle(page);
+      const n = await page.locator('#dock .dock-btn').count();
+      for (let i = 0; i < n; i++) {
+        await page.locator('#dock .dock-btn').nth(i).hover({ force: true });
+        await page.waitForFunction(k => getComputedStyle(document.querySelectorAll('#dock .dock-btn')[k].nextElementSibling).opacity === '1',
+          i, { timeout: 30_000, polling: 50 });
+        const tip = await page.evaluate(k => {
+          const t = document.querySelectorAll('#dock .dock-btn')[k].nextElementSibling, r = t.getBoundingClientRect();
+          return { text: t.textContent.trim(), l: r.left, r: r.right, W: innerWidth };
+        }, i);
+        if (tip.l < -0.5 || tip.r > tip.W + 0.5) spill.push(`${w}x${h}: "${tip.text}" spans x ${tip.l.toFixed(1)}..${tip.r.toFixed(1)} of ${tip.W}`);
+      }
     }
     assert.deepEqual(spill, []);
+    // a mouse still has a Space key: the hint stays
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#btn-pause + .tip kbd')).display), 'inline');
+  } finally {
+    await page.close();
+  }
+});
+
+test('touch screen: dock tooltips drop the Space key hint', T, async () => {
+  const page = await newPage(browser, { width: 390, height: 844, hasTouch: true, isMobile: true });
+  try {
+    await open(page, server.url, '?q=low');
+    const kbd = () => page.evaluate(() => getComputedStyle(document.querySelector('#btn-pause + .tip kbd')).display);
+    assert.equal(await page.evaluate(() => matchMedia('(pointer: coarse)').matches), true, 'a coarse pointer');
+    assert.equal(await kbd(), 'none');
+    // setPaused() rewrites the label and its <kbd>
+    await evalSim(page, sim => sim.actions.togglePause());
+    assert.equal(await page.textContent('#btn-pause + .tip'), 'Resume space');
+    assert.equal(await kbd(), 'none', 'still hidden after the pause label changes');
   } finally {
     await page.close();
   }
@@ -378,8 +399,7 @@ test('no WebGL: the fallback panel fits in portrait and at 844x390, the 2D drawe
       assert.ok(blocks.nogl && blocks.drawer, `${where}: #nogl and #drawer are rendered`);
       assert.equal(await page.isVisible('#nogl h2'), true, `${where}: the panel heading shows`);
       assert.deepEqual(offscreen(pick(blocks, ['nogl', 'drawer', 'dock']), W, H), [], `${where}: panel, drawer and dock stay inside the viewport`);
-      // the brand and stats are only part of the portrait check: see the todo test below for 844x390
-      const names = w < h ? ['nogl', 'drawer', 'dock', 'brand', 'stats'] : ['nogl', 'drawer', 'dock'];
+      const names = ['nogl', 'drawer', 'dock', 'brand', 'stats'];
       assert.deepEqual(collisions(pick(blocks, names)), [], `${where}: no collisions among ${names.join(', ')}`);
       if (h <= 480) assert.equal(await page.isVisible('#nogl p'), false, `${where}: the explanation is dropped on a short viewport`);
 
@@ -403,13 +423,24 @@ test('no WebGL: the fallback panel fits in portrait and at 844x390, the 2D drawe
   }
 });
 
-test('no WebGL at 844x390: the fallback panel leaves the brand and the stats uncovered', { ...T, todo: 'app bug: the max-height: 480px rule pins .nogl to top: 12px, over .brand and .stats' }, async () => {
+// At <= 720 px wide the stats drop below the brand and the 2D drawer overlaps
+// them on a short screen; only the panel's own collisions are checked here.
+test('no WebGL on short landscapes: the fallback panel leaves the brand, stats, drawer and dock uncovered', T, async () => {
   const page = await newPage(browser, { width: 844, height: 390 });
   try {
     await open(page, server.url, '?q=low', { nogl: true });
-    await settle(page);
-    const { blocks } = await hudBlocks(page);
-    assert.deepEqual(collisions(pick(blocks, ['nogl', 'brand', 'stats'])), []);
+    const bad = [];
+    for (const [w, h] of [[844, 390], [740, 360], [667, 375], [812, 375], [640, 360]]) {
+      if (w !== 844) await setViewport(page, w, h);
+      await settle(page);
+      const { blocks, W, H } = await hudBlocks(page);
+      const where = `${w}x${h}`;
+      assert.ok(blocks.nogl, `${where}: #nogl is rendered`);
+      assert.equal(await page.isVisible('#nogl h2'), true, `${where}: the panel heading shows`);
+      for (const other of ['brand', 'stats', 'drawer', 'dock']) bad.push(...collisions(pick(blocks, ['nogl', other])).map(c => `${where}: ${c}`));
+      bad.push(...offscreen(pick(blocks, ['nogl']), W, H).map(c => `${where}: ${c}`));
+    }
+    assert.deepEqual(bad, []);
   } finally {
     await page.close();
   }
