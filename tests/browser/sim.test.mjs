@@ -269,13 +269,22 @@ test('auto-freeze holds the sea at the sub-step that fired, so the stats and the
     await waitSim(page, (sim, x) => sim.state.ratio === x, r0);
     assert.deepEqual(await evalSim(page, sim => [sim.state.autoFreeze, sim.state.rogueCount]), [true, 0]);
 
-    await evalSim(page, (sim, t) => { sim.state.simTime = t; }, t1);
+    // a splash made at 860.60 s, i.e. after the sub-step the sea will freeze on; it sits
+    // outside the lab (y = 500), far enough from any crest not to move the beacon
+    await evalSim(page, (sim, t) => { sim.state.simTime = t; sim.ocean.addRipple(0, 500, t); }, t1);
     // per frame from the one that fired (it renders too) until two frames later
     const samples = (await sampleFrames(page, sim => {
       const s = sim.state;
       return {
         ev: s.lastEvent, simTime: s.simTime, rendered: sim.ocean.simTime, ratio: s.ratio, Hs: sim.sea.Hs, Hmax: s.Hmax,
+        ripples: sim.ocean.ripples.map(r => r.t0),
         ratioText: document.getElementById('v-ratio').textContent, alertSub: document.getElementById('alert-sub').textContent,
+        beacon: (() => {
+          const ev = s.lastEvent, el = document.getElementById('beacon');
+          if (!ev || el.hidden) return null;
+          const sp = sim.ocean.surfacePoint(ev.xM, ev.yM, ev.sim), pr = sim.ocean.project(sp.x, sp.h, sp.z);
+          return { sp: [sp.x, sp.h, sp.z], pr: [pr.sx, pr.sy], at: [parseFloat(el.style.left), parseFloat(el.style.top)] };
+        })(),
       };
     }, null, { until: out => out.filter(x => x.ev).length >= 3, max: 40 })).filter(x => x.ev);
 
@@ -288,6 +297,10 @@ test('auto-freeze holds the sea at the sub-step that fired, so the stats and the
       near(x.ratio, ev.ratio, 1e-12, `frame ${i}: the stats show the scan that fired`);
       near(x.Hmax, ev.ratio * x.Hs, 1e-9, `frame ${i}: H_max`);
       assert.equal(x.ratioText, ev.ratio.toFixed(2));
+      assert.deepEqual(x.ripples, [ev.sim], `frame ${i}: the later splash starts at the frozen time, not dropped`);
+      // the beacon is stamped at the crest as drawn at the sub-step, not at 860.60 s
+      [x.ev.px, x.ev.ph, x.ev.pz].forEach((v, k) => near(v, x.beacon ? x.beacon.sp[k] : NaN, 1e-9, `frame ${i}: beacon stamp axis ${k}`));
+      if (x.beacon) x.beacon.at.forEach((v, k) => near(v, x.beacon.pr[k], 1.5, `frame ${i}: beacon on screen axis ${k}`));
     }
     assert.equal(await evalSim(page, sim => sim.state.rogueCount), 1);
 

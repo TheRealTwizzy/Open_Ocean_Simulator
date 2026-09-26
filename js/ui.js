@@ -292,6 +292,8 @@ export function initUI({ state, sea, actions }) {
     const box = $('buoy-readout');
     if (!b) { box.hidden = true; hist.length = 0; return; }
     box.hidden = false;
+    // the auto-freeze can step the sea back a little: drop samples from after it
+    while (hist.length && hist[hist.length - 1][0] > simNow) hist.pop();
     if (!hist.length || simNow > hist[hist.length - 1][0]) hist.push([simNow, b.eta]);
     while (hist.length > 1 && simNow - hist[0][0] > 12) hist.shift();
     let mx = -Infinity, mn = Infinity;

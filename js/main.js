@@ -196,9 +196,15 @@ function frame(wallNow) {
     // the sim-time gap keeps a static sea (time speed 0) from re-counting one wave every cooldown
     const advanced = !state.lastEvent || best.t - state.lastEvent.sim > 1;
     if (ratio >= ROGUE_RATIO && wallNow > state.cooldownUntil && state.running && !frozen && advanced) {
+      // freeze on the sub-step that fired, so the sea and stats match the alert and beacon.
+      // On fast displays that can be before the last drawn frame: splashes made since
+      // then start at the frozen time instead of vanishing
+      if (state.autoFreeze) {
+        t = lastScanSim = state.simTime = best.t;
+        shown = best;
+        if (ocean) for (const r of ocean.ripples) r.t0 = Math.min(r.t0, t);
+      }
       triggerRogue(best, ratio, wallNow, best.t);
-      // freeze on the sub-step that fired, so the sea and stats match the alert and beacon
-      if (state.autoFreeze) { t = lastScanSim = state.simTime = best.t; shown = best; }
     }
     state.Hmax = shown.Hmax;
     state.ratio = sea.Hs > 0 ? shown.Hmax / sea.Hs : 0;

@@ -100,7 +100,8 @@ export async function launch(options = {}) {
 /**
  * New page in its own context with a viewport. Small viewports render much
  * faster on SwiftShader; use 1280x800 only where layout is under test.
- * Width > 640 keeps the desktop layout (the app switches to narrow at <= 640).
+ * Width > 720 and height > 480 keep the wide layout (the app has breakpoints
+ * at 900, 720 and 640 px wide and 480 px tall).
  * Close with `await page.close()` (the page owns its context).
  */
 export async function newPage(browser, { width = 800, height = 600, ...contextOptions } = {}) {
@@ -242,7 +243,9 @@ export async function findRogueTime(page, { from = 18, to = 21, step = 0.02 } = 
  * state.timeScale = 0 and state.simTime = t, so the next detection scan
  * (next frame) fires an event provided state.running, no freeze is active,
  * the 6 s wall cooldown has passed and the last event is > 1 s of sea time
- * away. Throws if no rogue is found. Follow with e.g.
+ * away. t must also be > 1 s of sea time from the previous scan (true on a
+ * fresh page), so only t is scanned; otherwise the scan sub-steps up to t and
+ * may fire earlier. Throws if no rogue is found. Follow with e.g.
  *   await waitSim(page, sim => sim.state.rogueCount > 0);
  * @returns {Promise<{ t: number, ratio: number }>}
  */
