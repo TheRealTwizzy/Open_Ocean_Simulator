@@ -166,7 +166,7 @@ ui.updateStats(0, 0);
 window.addEventListener('resize', () => ocean && ocean.resize());
 
 let lastWall = performance.now();
-let lastDetect = 0, tipTimer = 0;
+let lastDetect = 0, lastScanSim = 0, tipTimer = 0;
 
 function frame(wallNow) {
   const dt = Math.min((wallNow - lastWall) / 1000, 0.05);
@@ -180,12 +180,15 @@ function frame(wallNow) {
 
   if (wallNow - lastDetect >= DETECT_MS) {
     lastDetect = wallNow;
-    const best = detector.detect(t);
-    state.Hmax = best.Hmax;
-    state.ratio = sea.Hs > 0 ? best.Hmax / sea.Hs : 0;
+    // the stats show the sea at t; the trigger sees every sub-step since the last scan
+    const { best, last } = detector.scanInterval(lastScanSim, t);
+    lastScanSim = t;
+    state.Hmax = last.Hmax;
+    state.ratio = sea.Hs > 0 ? last.Hmax / sea.Hs : 0;
+    const ratio = sea.Hs > 0 ? best.Hmax / sea.Hs : 0;
     // the sim-time gap keeps a static sea (time speed 0) from re-counting one wave every cooldown
-    const advanced = !state.lastEvent || t - state.lastEvent.sim > 1;
-    if (state.ratio >= ROGUE_RATIO && wallNow > state.cooldownUntil && state.running && !frozen && advanced) triggerRogue(best, state.ratio, wallNow, t);
+    const advanced = !state.lastEvent || best.t - state.lastEvent.sim > 1;
+    if (ratio >= ROGUE_RATIO && wallNow > state.cooldownUntil && state.running && !frozen && advanced) triggerRogue(best, ratio, wallNow, best.t);
     ui.updateStats(state.Hmax, state.ratio);
   }
 
