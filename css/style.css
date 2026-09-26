@@ -127,6 +127,12 @@ kbd {
 }
 .hint.fade { opacity: 0; visibility: hidden; transition: opacity 0.8s ease, visibility 0s 0.8s; }
 
+/* ?fps readout: a debug overlay above everything, top centre */
+.perf {
+  position: absolute; top: 2px; left: 50%; transform: translateX(-50%); z-index: 60; pointer-events: none;
+  font: 11px var(--mono); color: var(--ink); background: rgba(3, 14, 28, 0.9); padding: 2px 8px; border-radius: 6px; white-space: nowrap;
+}
+
 /* ---------- buoy readout ---------- */
 .buoy-readout { position: absolute; top: 76px; left: 16px; padding: 8px 12px 6px; width: 246px; }
 .buoy-readout .row { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }

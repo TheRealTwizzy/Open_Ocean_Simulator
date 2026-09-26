@@ -9,6 +9,9 @@ const COOLDOWN_MS = 6000;
 const DETECT_MS = 33;
 
 const params = new URLSearchParams(location.search);
+// ?fps: frame/GPU time readout; ?noskip: shader without its zero-weight skips, to compare the two
+const PERF = params.has('fps');
+const SKIP_ZERO = !params.has('noskip');
 
 const state = {
   trains: [],
@@ -159,7 +162,7 @@ freshTrains();
 state.qualityActual = autoQuality();
 try {
   const { Ocean } = await import('./ocean.js');
-  ocean = new Ocean(canvas, sea, state.qualityActual);
+  ocean = new Ocean(canvas, sea, state.qualityActual, { skipZero: SKIP_ZERO, gpuTimer: PERF });
 } catch (err) {
   console.error('WebGL initialisation failed:', err);
   ocean = null;
@@ -172,10 +175,13 @@ window.addEventListener('resize', () => ocean && ocean.resize());
 
 let lastWall = performance.now();
 let lastDetect = 0, lastScanSim = 0, tipTimer = 0;
+const frameMs = [];                    // uncapped frame intervals, for ?fps
 
 function frame(wallNow) {
-  const dt = Math.min((wallNow - lastWall) / 1000, 0.05);
+  const rawMs = wallNow - lastWall;
+  const dt = Math.min(rawMs / 1000, 0.05);
   lastWall = wallNow;
+  if (PERF) { frameMs.push(rawMs); if (frameMs.length > 120) frameMs.shift(); }
   state.frames++;
 
   const frozen = wallNow < state.freezeUntil;
@@ -229,7 +235,11 @@ function frame(wallNow) {
     }
   }
   ui.draw2d(t, wallNow, state.Hmax);
-  if (wallNow - tipTimer > 500) { tipTimer = wallNow; ui.updateTip(state.ratio); }
+  if (wallNow - tipTimer > 500) {
+    tipTimer = wallNow;
+    ui.updateTip(state.ratio);
+    if (PERF) ui.updatePerf({ frameMs, gpuMs: ocean && ocean.gpuTimer ? ocean.gpuTimes : null, quality: state.qualityActual, skip: SKIP_ZERO });
+  }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

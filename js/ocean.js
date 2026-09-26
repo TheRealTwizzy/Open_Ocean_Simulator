@@ -47,7 +47,9 @@ void main() {
     vec4 c1 = texelFetch(uComps, ivec2(i, 1), 0);   // phase(t), a·k, Q·a, Q·a·k
     // components too short for the local vertex spacing alias; fade them out
     float lod = rim * (1.0 - smoothstep(2.0, 4.2, c0.y * spacing));
+#ifdef SKIP_ZERO
     if (lod <= 0.0) continue;         // contributes exactly zero: skip its sin/cos
+#endif
     c0.x *= lod; c1.yzw *= lod;
     float ph = c0.y * (c0.z * x + c0.w * y) + c1.x;
     float cs = cos(ph), sn = sin(ph);
@@ -129,19 +131,19 @@ void main() {
   vec3 toCam = cameraPosition - vWorld;
   float dist = length(toCam);
   vec3 V = toCam / max(dist, 1e-3);
-  // fine ripple detail the mesh cannot carry, fading with distance. Zero-weight noise is
-  // branched around, which only saves work on GPUs that skip a branch all lanes agree on
-  // (SwiftShader masks both sides: ~5-15% slower). FLAT keeps these two unbranched, as its
-  // discarded lanes still feed textureCube's derivatives.
+  // fine ripple detail the mesh cannot carry, fading with distance. SKIP_ZERO (off with
+  // ?noskip) branches around zero-weight noise, which only saves work on GPUs that skip a
+  // branch all lanes agree on (SwiftShader masks both sides: ~5-15% slower). FLAT keeps
+  // these two unbranched, as its discarded lanes still feed textureCube's derivatives.
   vec2 dn = vec2(0.0);
-#ifndef FLAT
+#if defined(SKIP_ZERO) && !defined(FLAT)
   if (dist < 420.0)
 #endif
   {
     float detail = (1.0 - smoothstep(40.0, 420.0, dist)) * 0.22;
     dn = vec2(fbm(vWorld.xz * 0.14 + uTime * 0.05) - 0.5, fbm(vWorld.zx * 0.14 - uTime * 0.04) - 0.5) * detail;
   }
-#ifndef FLAT
+#if defined(SKIP_ZERO) && !defined(FLAT)
   if (dist < 140.0)
 #endif
   {
@@ -158,7 +160,11 @@ void main() {
 
   float RdL = max(dot(R, uSunDir), 0.0);
   float glint = pow(RdL, 1400.0) * 14.0 + pow(RdL, 120.0) * 0.5;
-  float sparkle = dist < 900.0 ? mix(1.0, 0.4 + 1.2 * fbm(vWorld.xz * 0.3 + uTime * 0.09), 1.0 - smoothstep(150.0, 900.0, dist)) : 1.0;
+  float sparkle = 1.0;
+#ifdef SKIP_ZERO
+  if (dist < 900.0)
+#endif
+  sparkle = mix(1.0, 0.4 + 1.2 * fbm(vWorld.xz * 0.3 + uTime * 0.09), 1.0 - smoothstep(150.0, 900.0, dist));
   glint *= sparkle;
 
   float hN = vH / max(uHs, 0.2);
@@ -171,7 +177,11 @@ void main() {
   float fold = clamp(1.0 - vJ, 0.0, 1.0);
   float foamDrive = smoothstep(uFoamJ.x, uFoamJ.y, fold) + smoothstep(1.0, 1.5, hN) * 0.7 + vRip * 0.8;
   // foamDrive is 0 on the whole flat far plane (vJ = 1, vH = 0, vRip = 0)
-  float n1 = foamDrive > 0.0 ? fbm(vWorld.xz * 0.11 + vec2(uTime * 0.025, 0.0)) : 0.0;
+  float n1 = 0.0;
+#ifdef SKIP_ZERO
+  if (foamDrive > 0.0)
+#endif
+  n1 = fbm(vWorld.xz * 0.11 + vec2(uTime * 0.025, 0.0));
   float foam = clamp(foamDrive * smoothstep(0.32, 0.72, n1) * 1.5, 0.0, 1.0);
   col = mix(col, vec3(0.86, 0.92, 0.97) * (0.55 + 0.55 * NdL), foam);
 
@@ -224,7 +234,7 @@ function gridGeometry(size, segments, stretch = false) {
 }
 
 export class Ocean {
-  constructor(canvas, sea, quality = 'med') {
+  constructor(canvas, sea, quality = 'med', { skipZero = true, gpuTimer = false } = {}) {
     this.canvas = canvas;
     this.sea = sea;
     this.quality = quality;
@@ -232,6 +242,7 @@ export class Ocean {
     this.ripples = [];
     this.buoy = null;
     this.frameTimes = [];
+    this.gpuTimes = [];               // ms per ocean render, only with a GPU timer (?fps)
     this.transition = null;
     this._tmpV = new THREE.Vector3();
     this._tmpQ = new THREE.Quaternion();
@@ -279,12 +290,15 @@ export class Ocean {
     // three rebuilds programs and textures after a context restore, but the
     // baked cube map is a render target whose contents are simply gone
     this.needsRebake = false;
-    canvas.addEventListener('webglcontextrestored', () => { this.needsRebake = true; });
+    canvas.addEventListener('webglcontextrestored', () => {
+      this.needsRebake = true;
+      if (gpuTimer) this.gpuTimer = this.makeGpuTimer();
+    });
     // three re-creates its geometry bookkeeping on restore but leaves the old
     // one's dispose listener on the geometry, so setQuality's dispose() would
     // delete buffers of the dead context. Disposing while lost detaches it (the
     // deletes are no-ops then); the restored context re-uploads the grid.
-    canvas.addEventListener('webglcontextlost', () => this.mesh.geometry.dispose());
+    canvas.addEventListener('webglcontextlost', () => { this.mesh.geometry.dispose(); this.gpuTimer = null; });
 
     const sun = new THREE.DirectionalLight(0xfff1dc, 2.2);
     sun.position.copy(this.sunDir).multiplyScalar(1000);
@@ -316,12 +330,13 @@ export class Ocean {
       uFogNear: { value: 600 },
       uFogFar: { value: 4200 },
     };
-    const material = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: WAVE_VERT, fragmentShader: WAVE_FRAG });
+    const defines = skipZero ? { SKIP_ZERO: 1 } : {};
+    const material = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: WAVE_VERT, fragmentShader: WAVE_FRAG, defines });
     this.mesh = new THREE.Mesh(gridGeometry(PLANE, QUALITY[quality].segments, true), material);
     this.mesh.frustumCulled = false;
     this.scene.add(this.mesh);
 
-    const farMat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: WAVE_VERT, fragmentShader: WAVE_FRAG, defines: { FLAT: 1 } });
+    const farMat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: WAVE_VERT, fragmentShader: WAVE_FRAG, defines: { ...defines, FLAT: 1 } });
     const far = new THREE.Mesh(gridGeometry(FAR_PLANE, 2), farMat);
     far.position.y = -0.15;
     far.frustumCulled = false;
@@ -338,6 +353,30 @@ export class Ocean {
     this.setPreset('orbit', false);
     this.setQuality(quality);
     this.resize();
+    this.gpuTimer = gpuTimer ? this.makeGpuTimer() : null;
+  }
+
+  // GPU time of each render where the browser exposes EXT_disjoint_timer_query_webgl2
+  // (many Android GPUs; not Safari). Null otherwise.
+  makeGpuTimer() {
+    const ext = this.renderer.getContext().getExtension('EXT_disjoint_timer_query_webgl2');
+    return ext ? { ext, pending: [] } : null;
+  }
+
+  // Results arrive a few frames late; a disjoint event (e.g. a GPU power-state
+  // change) voids every query in flight.
+  drainGpuTimer() {
+    const gl = this.renderer.getContext(), T = this.gpuTimer;
+    const disjoint = gl.getParameter(T.ext.GPU_DISJOINT_EXT);
+    while (T.pending.length) {
+      const q = T.pending[0];
+      const ready = gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE);
+      if (!ready && !disjoint && T.pending.length <= 8) break;
+      if (ready && !disjoint) this.gpuTimes.push(gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6);
+      gl.deleteQuery(q);
+      T.pending.shift();
+    }
+    if (this.gpuTimes.length > 120) this.gpuTimes.splice(0, this.gpuTimes.length - 120);
   }
 
   // Re-render the sky dome into the reflection cube map (after sun/sky changes).
@@ -522,7 +561,11 @@ export class Ocean {
       m.scale.setScalar(s);
     }
 
+    const T = this.gpuTimer, gl = T && this.renderer.getContext();
+    const query = T && gl.createQuery();
+    if (query) gl.beginQuery(T.ext.TIME_ELAPSED_EXT, query);
     this.renderer.render(this.scene, this.camera);
+    if (query) { gl.endQuery(T.ext.TIME_ELAPSED_EXT); T.pending.push(query); this.drainGpuTimer(); }
     cam.y = camY;
     this.frameTimes.push(wallDt);
     if (this.frameTimes.length > 90) this.frameTimes.shift();

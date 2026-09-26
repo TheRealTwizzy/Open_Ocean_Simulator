@@ -444,6 +444,18 @@ export function initUI({ state, sea, actions }) {
     if (tip.dataset.html !== html) { tip.dataset.html = html; tip.innerHTML = html; }
   }
 
+  // ---------- ?fps readout ----------
+  const median = a => { const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
+  // medians over the last ~120 frames; gpuMs is null where the browser has no GPU timer
+  function updatePerf({ frameMs, gpuMs, quality, skip }) {
+    if (!frameMs.length) return;
+    const f = median(frameMs);
+    const gpu = !gpuMs ? 'n/a' : gpuMs.length ? median(gpuMs).toFixed(2) + ' ms' : '…';
+    const el = $('perf');
+    el.hidden = false;
+    el.textContent = `${quality} · skips ${skip ? 'on' : 'off'} · ${f.toFixed(1)} ms (${Math.round(1000 / f)} fps) · GPU ${gpu}`;
+  }
+
   // ---------- hint ----------
   setTimeout(() => $('hint').classList.add('fade'), 7000);
 
@@ -456,7 +468,7 @@ export function initUI({ state, sea, actions }) {
 
   return {
     refresh, syncAllCards, syncSettings, syncModes, renderLegend, updateStats, showAlert, hideAlert, setPaused, setFrozen, updateBeacon,
-    updateBuoy, resetBuoyHistory, draw2d, updateTip, closePop, setDrawer,
+    updateBuoy, resetBuoyHistory, draw2d, updateTip, updatePerf, closePop, setDrawer,
     isPopOpen: () => !!openPop,
     isDrawerOpen: () => !$('drawer').hidden,
     showNoGL: () => { $('nogl').hidden = false; setDrawer(true); },
