@@ -7,7 +7,7 @@
   --cyan-soft: rgba(34, 211, 238, 0.35);
   /* opaque enough for --faint text to keep 4.5:1 even over a white sky */
   --glass: rgba(3, 14, 28, 0.85);
-  --glass-2: rgba(6, 22, 42, 0.87);
+  --glass-2: rgba(6, 22, 42, 0.9);
   --glass-border: rgba(56, 205, 235, 0.26);
   --glass-border-lt: rgba(120, 230, 255, 0.5);
   --accent: #2dd4bf;
@@ -243,9 +243,10 @@ kbd {
   display: flex; align-items: center; gap: 10px; padding: 11px 16px;
   border-bottom: 1px solid rgba(56, 205, 235, 0.16);
 }
+/* caustic stripes sweep behind the header text: faint enough for --faint to keep 4.5:1 */
 .popover > header::before, .drawer > header::before {
   content: ""; position: absolute; inset: -60% -30%; pointer-events: none;
-  background: repeating-linear-gradient(112deg, transparent 0 22px, rgba(120, 230, 255, 0.07) 22px 31px, transparent 31px 52px);
+  background: repeating-linear-gradient(112deg, transparent 0 22px, rgba(120, 230, 255, 0.04) 22px 31px, transparent 31px 52px);
   animation: caustic 11s linear infinite;
 }
 @keyframes caustic { from { transform: translateX(-60px); } to { transform: translateX(60px); } }

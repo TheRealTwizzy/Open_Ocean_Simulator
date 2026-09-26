@@ -1,10 +1,14 @@
 // Text contrast of the HUD in a real browser. The panels are translucent glass
 // over a live WebGL sky and sea that can be near-white, so every text is
-// measured against the worst case: its own and its ancestors' background
-// colours composited over a white backdrop (a gradient counts as its
-// least-opaque stop; backdrop blur is ignored). Text in --faint or --muted must
-// reach WCAG AA 4.5:1; every other text colour is reported, not asserted.
-// Run: node --test tests/browser/contrast.test.mjs
+// measured against the worst case: what its own box and its ancestors paint
+// behind it, composited over a white backdrop. That is their background colours
+// and images, their ::before/::after boxes that overlap it (the caustic stripes
+// sweeping behind popover and drawer header text) and their inset glows
+// (zero-offset inset box-shadows, at half their alpha: their value along the
+// padding edge, which text never reaches). A gradient counts as the stop that
+// leaves the lowest contrast; backdrop blur is ignored. Text in --faint or
+// --muted must reach WCAG AA 4.5:1; every other text colour is reported, not
+// asserted. Run: node --test tests/browser/contrast.test.mjs
 
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -59,6 +63,44 @@ function measureText() {
     probe.remove();
   }
   const opacity = el => { let o = 1; for (let e = el; e; e = e.parentElement) o *= parseFloat(getComputedStyle(e).opacity); return o; };
+  const px = v => (/px$/.test(v) ? parseFloat(v) : NaN);
+  // Whether e's ::before/::after (computed style ps) overlaps rect r. An
+  // absolutely positioned box is placed from its resolved offsets in e's
+  // padding box; any other, or one that does not resolve, counts as overlapping.
+  const pseudoOverlaps = (e, ps, r) => {
+    if (ps.position !== 'absolute') return true;
+    const b = e.getBoundingClientRect(), s = getComputedStyle(e);
+    const bl = px(s.borderLeftWidth), bt = px(s.borderTopWidth);
+    const w = px(ps.width), h = px(ps.height);
+    const left = Number.isNaN(px(ps.left)) ? b.width - bl - px(s.borderRightWidth) - px(ps.right) - w : px(ps.left);
+    const top = Number.isNaN(px(ps.top)) ? b.height - bt - px(s.borderBottomWidth) - px(ps.bottom) - h : px(ps.top);
+    if ([w, h, left, top].some(Number.isNaN)) return true;
+    const x = b.left + bl + left, y = b.top + bt + top;
+    return x < r.right && x + w > r.left && y < r.bottom && y + h > r.top;
+  };
+  // background image (its colour stops) over background colour, top first
+  const fills = (s, alpha = 1) => {
+    const out = [], stops = [...s.backgroundImage.matchAll(/rgba?\([^)]+\)/g)].map(m => parse(m[0])), bg = parse(s.backgroundColor);
+    if (stops.length) out.push(stops.map(c => [c[0], c[1], c[2], c[3] * alpha]));
+    if (bg && bg[3] > 0) out.push([[bg[0], bg[1], bg[2], bg[3] * alpha]]);
+    return out;
+  };
+  // What e paints behind text in rect r, top first, each layer a list of
+  // candidate colours: its ::after and ::before, its inset glows, its own fills.
+  const layersOf = (e, r) => {
+    const s = getComputedStyle(e), out = [];
+    for (const which of ['::after', '::before']) {
+      const ps = getComputedStyle(e, which);
+      if (/^(none|normal)$/.test(ps.content) || ps.display === 'none' || ps.visibility !== 'visible' || !pseudoOverlaps(e, ps, r)) continue;
+      out.push(...fills(ps, parseFloat(ps.opacity)));
+    }
+    for (const sh of s.boxShadow === 'none' ? [] : s.boxShadow.split(/,(?![^(]*\))/)) {
+      const c = parse(sh), [x, y, blur] = (sh.replace(/rgba?\([^)]*\)/, '').match(/-?[\d.]+px/g) || []).map(parseFloat);
+      if (/\binset\b/.test(sh) && c && x === 0 && y === 0 && blur > 0) out.push([[c[0], c[1], c[2], c[3] / 2]]);
+    }
+    out.push(...fills(s));
+    return out;
+  };
   // 'panel › tag(id).class' ('#' would be escaped in the TAP output)
   const label = el => {
     const own = el.tagName.toLowerCase() + (el.id ? `(${el.id})` : '') +
@@ -72,19 +114,15 @@ function measureText() {
     if (!text) continue;
     const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
     if (r.width === 0 || r.height === 0 || cs.visibility !== 'visible' || opacity(el) < 0.05) continue;
-    const layers = [];
-    for (let e = el; e && e !== document.body; e = e.parentElement) {
-      const s = getComputedStyle(e), stops = [];
-      const bg = parse(s.backgroundColor);
-      for (const m of s.backgroundImage.matchAll(/rgba?\([^)]+\)/g)) stops.push(parse(m[0]));
-      // background images paint over the background colour
-      if (stops.length) layers.push(stops.reduce((a, b) => (b[3] < a[3] ? b : a)));
-      if (bg && bg[3] > 0) layers.push(bg);
-    }
-    let back = [255, 255, 255];
-    for (let i = layers.length - 1; i >= 0; i--) back = over(layers[i], back);
     const color = parse(cs.color);
     if (!color) continue;
+    const layers = [];
+    for (let e = el; e && e !== document.body; e = e.parentElement) layers.push(...layersOf(e, r));
+    const contrast = b => ratio(over(color, b), b);
+    let back = [255, 255, 255];
+    for (let i = layers.length - 1; i >= 0; i--) {
+      back = layers[i].map(c => over(c, back)).reduce((a, b) => (contrast(b) < contrast(a) ? b : a));
+    }
     const fg = over(color, back);
     out.push({
       el: label(el), text: text.slice(0, 24), token: tokenOf[cs.color] || null,
