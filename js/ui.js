@@ -273,7 +273,8 @@ export function initUI({ state, sea, actions }) {
   function updateBeacon(wallNow, project) {
     const ev = state.lastEvent, el = $('beacon');
     if (!ev || wallNow - ev.wall > MARKER_MS) { el.hidden = true; return; }
-    const p = project(ev.xM, ev.eta, ev.yM);
+    // the crest as drawn (stamped by main.js), else the detector's linear point
+    const p = project(ev.px ?? ev.xM, ev.ph ?? ev.eta, ev.pz ?? ev.yM);
     if (!p) { el.hidden = true; return; }
     el.hidden = false;
     el.style.left = p.sx + 'px';

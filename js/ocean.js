@@ -468,14 +468,20 @@ export class Ocean {
     this.buoyMesh.visible = false;
   }
 
-  // Surface point (renderer axes) and elevation at the buoy, on the rendered
-  // mesh (same spacing/rim fades as the shader) including ripples.
+  // Where the material point at sea-plane (x, y) is drawn: renderer axes
+  // (x, h, z) on the rendered mesh (Gerstner displacement with the shader's
+  // spacing/rim fades, plus ripples) and its normal (ripples left out).
+  surfacePoint(x, y, t) {
+    const p = this.sea.displaced(x, y, t, this._pt, this.gridSpacingAt(x, y), this.rimAt(x, y));
+    return { x: p.x, h: p.h + rippleEta(this.ripples, x, y, t), z: p.y, nx: p.nx, ny: p.ny, nz: p.nz };
+  }
+
+  // Surface point and elevation at the buoy.
   buoyState(t) {
     if (!this.buoy) return null;
-    const { x, y } = this.buoy;
-    const p = this.sea.displaced(x, y, t, this._pt, this.gridSpacingAt(x, y), this.rimAt(x, y));
-    const rip = rippleEta(this.ripples, x, y, t);
-    return { x: p.x, h: p.h + rip, z: p.y, eta: p.h + rip, nx: p.nx, ny: p.ny, nz: p.nz };
+    const s = this.surfacePoint(this.buoy.x, this.buoy.y, t);
+    s.eta = s.h;
+    return s;
   }
 
   frame(simTime, wallDt) {

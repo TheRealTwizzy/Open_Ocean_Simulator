@@ -1,7 +1,8 @@
 // Browser specs for the simulation behaviour: rogue detection (alert, freeze,
-// one count per wave), splash and buoy clicks, wheel zoom, the surface camera
-// clearance, reduced motion, render quality / pixel ratio, HUD overlays that
-// let clicks through, and the 2D drawer canvas. Run: npm run test:browser
+// one count per wave, the beacon on the crest as drawn), splash and buoy
+// clicks, wheel zoom, the surface camera clearance, reduced motion, render
+// quality / pixel ratio, HUD overlays that let clicks through, and the 2D
+// drawer canvas. Run: npm run test:browser
 //
 // Everything waits on rendered frames (window.__sim.state.frames) or on state;
 // SwiftShader takes 0.2-0.8 s per frame, so there are no sleeps for rendering.
@@ -209,6 +210,82 @@ test('reset after an event hides the alert, the beacon and the count', T, async 
       rogueCount: sim.state.rogueCount,
     }));
     assert.deepEqual(dom, { alert: false, beaconHidden: true, frozen: false, count: '0', rogueCount: 0 }, 'alert stays hidden after reset');
+
+    assert.deepEqual(onlyErrors(log), []);
+  } finally {
+    await page.close();
+  }
+});
+
+test('the rogue beacon marks the crest where the Low mesh draws it at a lab corner, not the linear elevation', T, async t => {
+  const page = await newPage(browser);
+  const log = collectConsole(page);
+  try {
+    await open(page, server.url, '?q=low');
+    // Both trains focus near the (-280, -150) corner over a light wind sea,
+    // so the detector's crest lands in the corner, where the coarse Low grid
+    // fades the short wind waves and Gerstner steepness shifts the crest.
+    const found = await evalSim(page, sim => {
+      const s = sim.state, o = sim.ocean;
+      s.running = false;
+      s.wind = 4;
+      for (const tr of s.trains) { tr.x0 = -280; tr.y0 = -150; tr.tf = 20; }
+      sim.actions.rebuild();
+      // the strongest >= 2.02 H_s event whose crest the detector puts in the corner
+      let best = null;
+      for (let i = 0; i <= 500; i++) {
+        const t = 16 + i * 0.02, d = sim.detector.detect(t), ratio = d.Hmax / sim.sea.Hs;
+        const corner = d.xM <= -240 && d.yM <= -120;
+        if (corner && ratio >= 2.02 && (!best || ratio > best.ratio)) best = { t, ratio, xM: d.xM, yM: d.yM, eta: d.eta };
+      }
+      if (!best) return null;
+      // the crest as rendered: Gerstner-displaced with the shader's spacing and rim fades (no ripples here)
+      const p = sim.sea.displaced(best.xM, best.yM, best.t, {}, o.gridSpacingAt(best.xM, best.yM), o.rimAt(best.xM, best.yM));
+      // view it from ~45 m, where 1 m is ~15 px
+      o.controls.target.set(p.x, p.h, p.y);
+      o.camera.position.set(p.x + 30, p.h + 14, p.y + 30);
+      o.controls.update();
+      return { ...best, ref: { x: p.x, h: p.h, z: p.y }, quality: s.qualityActual, segments: o.mesh.geometry.parameters.segments };
+    });
+    assert.ok(found, 'a >= 2.02 H_s rogue forms in the corner (x <= -240, y <= -120) in the scanned window');
+    assert.deepEqual({ quality: found.quality, segments: found.segments }, { quality: 'low', segments: 160 });
+    const { ref } = found;
+    const off = Math.hypot(ref.x - found.xM, ref.h - found.eta, ref.z - found.yM);
+    assert.ok(off > 0.5, `the rendered crest is ${off.toFixed(2)} m from the linear point (xM, eta, yM)`);
+
+    // park the sea on it and let the frame loop detect it
+    await evalSim(page, (sim, t) => { sim.state.timeScale = 0; sim.state.simTime = t; sim.state.running = true; }, found.t);
+    await waitSim(page, sim => sim.state.rogueCount > 0);
+    const shown = await evalSim(page, (sim, ref) => {
+      const o = sim.ocean, el = document.getElementById('beacon'), box = el.getBoundingClientRect();
+      return {
+        hidden: el.hidden, left: parseFloat(el.style.left), top: parseFloat(el.style.top),
+        cx: box.left + box.width / 2, cy: box.top + box.height / 2,
+        drawn: o.project(ref.x, ref.h, ref.z), linear: (ev => o.project(ev.xM, ev.eta, ev.yM))(sim.state.lastEvent),
+      };
+    }, ref);
+    assert.equal(shown.hidden, false, '#beacon is shown');
+    near(shown.cx, shown.left, 0.5, 'beacon box centre x is its style position');
+    near(shown.cy, shown.top, 0.5, 'beacon box centre y is its style position');
+    const gap = Math.hypot(shown.drawn.sx - shown.linear.sx, shown.drawn.sy - shown.linear.sy);
+    t.diagnostic(`crest (${found.xM}, ${found.yM}) at t ${found.t.toFixed(2)}, ratio ${found.ratio.toFixed(3)}: drawn ${off.toFixed(2)} m / ${gap.toFixed(1)} px from the linear point; ` +
+      `beacon (${shown.left.toFixed(1)}, ${shown.top.toFixed(1)}), drawn crest (${shown.drawn.sx.toFixed(1)}, ${shown.drawn.sy.toFixed(1)}), linear (${shown.linear.sx.toFixed(1)}, ${shown.linear.sy.toFixed(1)})`);
+    assert.ok(gap > 5, `the rendered crest and the linear point are ${gap.toFixed(1)} px apart on screen`);
+    near(shown.left, shown.drawn.sx, 1.5, 'beacon x is on the rendered crest');
+    near(shown.top, shown.drawn.sy, 1.5, 'beacon y is on the rendered crest');
+
+    const ev = await evalSim(page, sim => {
+      const e = sim.state.lastEvent, sp = sim.ocean.surfacePoint(e.xM, e.yM, e.sim);
+      return { ...e, sp: { x: sp.x, h: sp.h, z: sp.z }, proj: sim.ocean.project(e.px, e.ph, e.pz) };
+    });
+    assert.deepEqual({ xM: ev.xM, yM: ev.yM, eta: ev.eta, sim: ev.sim }, { xM: found.xM, yM: found.yM, eta: found.eta, sim: found.t },
+      'the event keeps the detector crest and its linear eta');
+    for (const [k, p] of [['x', 'px'], ['h', 'ph'], ['z', 'pz']]) {
+      near(ev[p], ev.sp[k], 1e-9, `lastEvent.${p} is ocean.surfacePoint(xM, yM, sim).${k}`);
+      near(ev[p], ref[k], 1e-9, `lastEvent.${p} is the rendered crest ${k}`);
+    }
+    near(shown.left, ev.proj.sx, 1.5, 'beacon x is ocean.project(px, ph, pz)');
+    near(shown.top, ev.proj.sy, 1.5, 'beacon y is ocean.project(px, ph, pz)');
 
     assert.deepEqual(onlyErrors(log), []);
   } finally {

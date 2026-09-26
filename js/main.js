@@ -123,6 +123,11 @@ actions.reset = () => {
 function triggerRogue(best, ratio, wallNow, simNow) {
   state.rogueCount++;
   state.lastEvent = { xM: best.xM, yM: best.yM, eta: best.eta, ratio, wall: wallNow, sim: simNow };
+  // eta is the detector's linear elevation; the beacon goes where the crest is drawn
+  if (ocean) {
+    const p = ocean.surfacePoint(best.xM, best.yM, simNow);
+    Object.assign(state.lastEvent, { px: p.x, ph: p.h, pz: p.z });
+  }
   state.cooldownUntil = wallNow + COOLDOWN_MS;
   if (state.autoFreeze) state.freezeUntil = wallNow + FREEZE_MS;
   ui.showAlert(state.lastEvent);
