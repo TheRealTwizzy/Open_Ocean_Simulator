@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rogue Wave Lab — Constructive Interference Simulator</title>
+<!-- Styling is hand-rolled (Tailwind-inspired tokens) so the file works offline with zero external dependencies. -->
+<style>
+  :root {
+    --bg-0: #030a14;
+    --bg-1: #081527;
+    --panel: #0b1a2ecc;
+    --panel-solid: #0c1b2f;
+    --border: #16324e;
+    --border-lt: #1f4266;
+    --text: #d9e8f5;
+    --muted: #7e99b5;
+    --faint: #52708c;
+    --wave-a: #38bdf8;
+    --wave-b: #a78bfa;
+    --wave-sum: #f1f5f9;
+    --accent: #2dd4bf;
+    --warn: #fbbf24;
+    --danger: #f87171;
+    --danger-deep: #ef4444;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%);
+    color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    overflow-x: hidden;
+  }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+
+  .app { display: flex; min-height: 100vh; }
+  .main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; padding: 14px 16px 20px; gap: 12px; }
+
+  /* ---------- header ---------- */
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+  .brand h1 { font-size: 17px; font-weight: 650; letter-spacing: 0.2px; }
+  .brand p { font-size: 11.5px; color: var(--muted); margin-top: -2px; }
+  .spacer { flex: 1 1 auto; }
+  .stats { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+  .stat {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 5px 11px; min-width: 84px;
+  }
+  .stat .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--faint); }
+  .stat .v { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat .v small { font-size: 10.5px; font-weight: 500; color: var(--muted); }
+  #stat-ratio.hot .v { color: var(--warn); }
+  #stat-ratio.rogue .v { color: var(--danger); }
+  .meter { height: 4px; border-radius: 2px; background: #12283f; margin-top: 4px; position: relative; overflow: hidden; }
+  .meter .fill { position: absolute; inset: 0 auto 0 0; width: 0%; background: var(--accent); border-radius: 2px; transition: width 90ms linear; }
+  .meter .tick { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--danger); left: 80%; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 13px; font-size: 13px; font-weight: 550; color: var(--text);
+    transition: border-color 120ms, background 120ms;
+  }
+  .btn:hover { border-color: var(--border-lt); background: #10233b; }
+  .btn.primary { border-color: #1c5f57; background: #0d2b2c; color: var(--accent); }
+  .btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+
+  /* ---------- canvas stage ---------- */
+  .stage {
+    position: relative; flex: 1 1 auto; min-height: 340px;
+    border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+    background: linear-gradient(180deg, #04101f 0%, #061c33 55%, #04101f 100%);
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  .legend {
+    position: absolute; top: 10px; left: 12px; display: flex; gap: 14px; flex-wrap: wrap;
+    font-size: 11.5px; color: var(--muted); pointer-events: none;
+    background: #030a1499; padding: 4px 10px; border-radius: 6px;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 16px; height: 3px; border-radius: 2px; display: inline-block; }
+
+  .alert-overlay {
+    position: absolute; inset: 0; display: none; pointer-events: none;
+    align-items: flex-start; justify-content: center; padding-top: 26px;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(239,68,68,0.16) 100%);
+  }
+  .alert-overlay.show { display: flex; animation: alertFlash 0.55s ease-in-out 3; }
+  .alert-banner {
+    background: #2a0a0ae6; border: 1px solid var(--danger-deep); border-radius: 10px;
+    padding: 10px 22px; text-align: center;
+    box-shadow: 0 0 34px rgba(239,68,68,0.45);
+  }
+  .alert-banner .title { font-size: 17px; font-weight: 750; letter-spacing: 1.5px; color: var(--danger); }
+  .alert-banner .sub { font-size: 12px; color: #fca5a5; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  @keyframes alertFlash { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  @media (prefers-reduced-motion: reduce) { .alert-overlay.show { animation: none; } }
+
+  .frozen-note {
+    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--warn);
+    background: #1f160399; border: 1px solid #4d3a10; border-radius: 6px; padding: 3px 10px;
+    display: none; pointer-events: none;
+  }
+  .frozen-note.show { display: block; }
+
+  /* ---------- controls ---------- */
+  .controls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;
+  }
+  .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; display: flex; align-items: center; gap: 7px; }
+  .card h2 .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .card.train-a h2 { color: var(--wave-a); }
+  .card.train-b h2 { color: var(--wave-b); }
+  .card.global h2 { color: var(--accent); }
+  .ctl { margin-bottom: 9px; }
+  .ctl:last-child { margin-bottom: 0; }
+  .ctl label { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  .ctl output { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 22px; background: transparent; cursor: pointer; }
+  input[type="range"]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: #143253; }
+  input[type="range"]::-moz-range-track { height: 4px; border-radius: 2px; background: #143253; }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; margin-top: -5px;
+    background: var(--text); border: 2px solid var(--accent);
+  }
+  input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: var(--text); border: 2px solid var(--accent); }
+  .train-a input[type="range"]::-webkit-slider-thumb { border-color: var(--wave-a); }
+  .train-b input[type="range"]::-webkit-slider-thumb { border-color: var(--wave-b); }
+  .train-a input[type="range"]::-moz-range-thumb { border-color: var(--wave-a); }
+  .train-b input[type="range"]::-moz-range-thumb { border-color: var(--wave-b); }
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--muted); margin-top: 10px; }
+  .toggle-row input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+
+  /* ---------- sidebar ---------- */
+  .sidebar {
+    flex: 0 0 330px; max-width: 330px; border-left: 1px solid var(--border);
+    background: var(--panel-solid); padding: 16px 18px 28px; overflow-y: auto; max-height: 100vh;
+    position: sticky; top: 0;
+  }
+  .sidebar.hidden { display: none; }
+  .sidebar h2 { font-size: 14px; font-weight: 650; margin-bottom: 4px; }
+  .sidebar .close { float: right; color: var(--muted); font-size: 17px; padding: 0 4px; }
+  .sidebar .close:hover { color: var(--text); }
+  .tip {
+    background: #0d2b2c; border: 1px solid #1c5f57; border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 9px 11px; font-size: 12.5px; margin: 10px 0 16px; color: #b8ece4;
+  }
+  .tip b { color: var(--accent); }
+  .sidebar section { margin-bottom: 16px; }
+  .sidebar h3 { font-size: 12.5px; font-weight: 650; color: var(--accent); margin-bottom: 4px; letter-spacing: 0.2px; }
+  .sidebar p { font-size: 12.5px; color: #a9c0d6; margin-bottom: 6px; }
+  .sidebar .eq {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
+    background: #071120; border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 9px; margin: 6px 0; color: var(--text); overflow-x: auto; white-space: nowrap;
+  }
+  .sidebar .a { color: var(--wave-a); font-weight: 600; }
+  .sidebar .b { color: var(--wave-b); font-weight: 600; }
+  .sidebar .r { color: var(--warn); font-weight: 600; }
+
+  @media (max-width: 980px) {
+    .controls { grid-template-columns: 1fr; }
+    .sidebar {
+      position: fixed; inset: 0 0 0 auto; width: min(330px, 88vw); max-width: none; z-index: 40;
+      box-shadow: -18px 0 40px #000a; max-height: none;
+    }
+    .stage { min-height: 260px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="main">
+    <header>
+      <div class="brand">
+        <h1>Rogue Wave Lab</h1>
+        <p>Deep-ocean rogue wave formation by constructive interference</p>
+      </div>
+      <div class="spacer"></div>
+      <div class="stats">
+        <div class="stat"><div class="k">H<sub>s</sub> (sig. height)</div><div class="v"><span id="v-hs">–</span><small> m</small></div></div>
+        <div class="stat"><div class="k">H<sub>max</sub> now</div><div class="v"><span id="v-hmax">–</span><small> m</small></div></div>
+        <div class="stat" id="stat-ratio">
+          <div class="k">H<sub>max</sub> / H<sub>s</sub> <span style="color:var(--danger)">(rogue ≥ 2)</span></div>
+          <div class="v" id="v-ratio">–</div>
+          <div class="meter"><div class="fill" id="meter-fill"></div><div class="tick"></div></div>
+        </div>
+        <div class="stat"><div class="k">Rogue events</div><div class="v" id="v-count">0</div></div>
+      </div>
+      <button class="btn primary" id="btn-pause" aria-pressed="false">⏸ Pause</button>
+      <button class="btn" id="btn-reset">↺ Reset</button>
+      <button class="btn" id="btn-sidebar" aria-pressed="true">ⓘ Physics</button>
+    </header>
+
+    <div class="stage">
+      <canvas id="sea"></canvas>
+      <div class="legend">
+        <span><i class="swatch" style="background:var(--wave-a)"></i>Wave Train A</span>
+        <span><i class="swatch" style="background:var(--wave-b)"></i>Wave Train B</span>
+        <span><i class="swatch" style="background:var(--wave-sum);height:4px"></i>Resulting Sea State (A + B)</span>
+      </div>
+      <div class="alert-overlay" id="alert">
+        <div class="alert-banner">
+          <div class="title">⚠ ROGUE WAVE DETECTED</div>
+          <div class="sub" id="alert-sub"></div>
+        </div>
+      </div>
+      <div class="frozen-note" id="frozen-note">Simulation frozen — inspecting convergence</div>
+    </div>
+
+    <div class="controls">
+      <div class="card train-a">
+        <h2><span class="dot" style="background:var(--wave-a)"></span>Wave Train A</h2>
+        <div class="ctl"><label for="a-amp">Amplitude <output id="a-amp-v"></output></label>
+          <input type="range" id="a-amp" min="0.2" max="4" step="0.05" value="1.8"></div>
+        <div class="ctl"><label for="a-freq">Frequency <output id="a-freq-v"></output></label>
+          <input type="range" id="a-freq" min="0.05" max="0.3" step="0.005" value="0.15"></div>
+        <div class="ctl"><label for="a-speed">Propagation speed <output id="a-speed-v"></output></label>
+          <input type="range" id="a-speed" min="2" max="16" step="0.25" value="10.5"></div>
+      </div>
+      <div class="card train-b">
+        <h2><span class="dot" style="background:var(--wave-b)"></span>Wave Train B</h2>
+        <div class="ctl"><label for="b-amp">Amplitude <output id="b-amp-v"></output></label>
+          <input type="range" id="b-amp" min="0.2" max="4" step="0.05" value="1.6"></div>
+        <div class="ctl"><label for="b-freq">Frequency <output id="b-freq-v"></output></label>
+          <input type="range" id="b-freq" min="0.05" max="0.3" step="0.005" value="0.11"></div>
+        <div class="ctl"><label for="b-speed">Propagation speed <output id="b-speed-v"></output></label>
+          <input type="range" id="b-speed" min="2" max="16" step="0.25" value="6.5"></div>
+      </div>
+      <div class="card global">
+        <h2><span class="dot" style="background:var(--accent)"></span>Simulation</h2>
+        <div class="ctl"><label for="g-speed">Time step / speed <output id="g-speed-v"></output></label>
+          <input type="range" id="g-speed" min="0" max="8" step="0.25" value="2.5"></div>
+        <div class="toggle-row">
+          <label for="g-freeze">Auto-freeze on rogue detection (1.6 s)</label>
+          <input type="checkbox" id="g-freeze" checked>
+        </div>
+        <div class="toggle-row" style="margin-top:6px">
+          <span style="font-size:11.5px;color:var(--faint)">Each train is a narrow-band group of 7 components — the honest model of a storm swell. See the Physics panel.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <aside class="sidebar" id="sidebar" aria-label="Physics explainer">
+    <button class="close" id="btn-close-sidebar" title="Close panel">✕</button>
+    <h2>How rogue waves form</h2>
+    <div class="tip" id="tip"><b>Tip:</b> watch the white line — it is the literal sum of the blue and violet lines at every point.</div>
+
+    <section>
+      <h3>Superposition</h3>
+      <p>The ocean surface obeys (to first order) a linear wave equation, so overlapping wave systems simply add. At every horizontal position <span class="eq" style="display:inline;padding:1px 6px">x</span>:</p>
+      <div class="eq"><span class="r">η(x,t)</span> = <span class="a">η_A(x,t)</span> + <span class="b">η_B(x,t)</span></div>
+      <p>Where crests of <span class="a">A</span> and <span class="b">B</span> coincide, the surface elevations reinforce — <em>constructive interference</em>. Where a crest meets a trough, they cancel.</p>
+    </section>
+
+    <section>
+      <h3>Linear focusing</h3>
+      <p>A real storm swell is not one sine wave but a <em>band</em> of components with slightly different frequencies. Here each train bundles 7 such components. Most of the time their phases are scrambled and the sea looks moderate — the energy is spread out.</p>
+      <p>Occasionally the components drift into step at one point in space: their amplitudes add coherently and a single towering crest appears, then vanishes as the phases drift apart again. That transient pile-up of otherwise ordinary wave energy is <em>linear (dispersive) focusing</em> — the leading explanation for many deep-water rogue waves.</p>
+    </section>
+
+    <section>
+      <h3>Phase alignment between trains</h3>
+      <p>The two trains travel at different speeds, so train A's wave group continually laps train B's. When both groups — and the individual crests inside them — line up at the same spot, the surface can briefly reach nearly the sum of everything: that is the flash-highlighted convergence point.</p>
+      <p>Set the two frequencies nearly equal and you will see slow <em>beats</em> instead: broad regions of reinforcement and cancellation drifting across the sea.</p>
+    </section>
+
+    <section>
+      <h3>Significant wave height H<sub>s</sub></h3>
+      <p>Oceanographers characterize a sea state by the significant wave height, four times the standard deviation of the surface elevation:</p>
+      <div class="eq">H_s = 4·σ,&nbsp;&nbsp; σ² = Σ aᵢ²⁄2</div>
+      <p>H<sub>s</sub> is computed live from the component amplitudes of both trains. A wave qualifies as <span class="r">rogue</span> when its crest-to-trough height exceeds twice the significant height:</p>
+      <div class="eq">H_max &gt; 2·H_s</div>
+      <p>The dashed guide lines mark elevations of ±H<sub>s</sub>∕2 and ±H<sub>s</sub>: a roughly symmetric wave touching the outer ±H<sub>s</sub> lines has a height near 2·H<sub>s</sub> — rogue territory.</p>
+    </section>
+
+    <section>
+      <h3>Why rogues are rare</h3>
+      <p>Two pure sine waves can never exceed 2·H<sub>s</sub> — the statistics forbid it. It takes many components conspiring: with 14 components here, perfect alignment is possible but improbable, which is exactly why real rogue waves are rare, sudden, and were dismissed as sailors' legend until the Draupner platform measured one on 1 January 1995 (25.6 m in a 12 m sea).</p>
+      <p><b>Recipe to hunt one:</b> keep the two amplitudes similar, keep a healthy speed difference between the trains, and let the simulation run. Watch the H<sub>max</sub>∕H<sub>s</sub> meter approach the red tick.</p>
+    </section>
+  </aside>
+</div>
+
+<script>
+'use strict';
+(() => {
+  // ---------- world / model constants ----------
+  const WORLD_W = 600;          // metres of ocean shown across the canvas
+  const N_COMP = 7;             // sinusoidal components per wave train
+  const COMP_SPACING = 0.1;     // fractional frequency spacing between adjacent components
+  const ROGUE_RATIO = 2.0;      // H_max / H_s threshold (standard oceanographic definition)
+  const FREEZE_MS = 1600;
+  const COOLDOWN_MS = 6000;
+  const MARKER_MS = 3500;
+
+  const DEFAULTS = {
+    aAmp: 1.8, aFreq: 0.15, aSpeed: 10.5,
+    bAmp: 1.6, bFreq: 0.11, bSpeed: 6.5,
+    timeScale: 2.5,
+  };
+
+  const $ = id => document.getElementById(id);
+  const canvas = $('sea'), ctx = canvas.getContext('2d');
+
+  const controls = {
+    aAmp: $('a-amp'), aFreq: $('a-freq'), aSpeed: $('a-speed'),
+    bAmp: $('b-amp'), bFreq: $('b-freq'), bSpeed: $('b-speed'),
+    timeScale: $('g-speed'),
+  };
+  const outputs = {
+    aAmp: $('a-amp-v'), aFreq: $('a-freq-v'), aSpeed: $('a-speed-v'),
+    bAmp: $('b-amp-v'), bFreq: $('b-freq-v'), bSpeed: $('b-speed-v'),
+    timeScale: $('g-speed-v'),
+  };
+  const fmt = {
+    aAmp: v => v.toFixed(2) + ' m', bAmp: v => v.toFixed(2) + ' m',
+    aFreq: v => v.toFixed(3) + ' Hz', bFreq: v => v.toFixed(3) + ' Hz',
+    aSpeed: v => v.toFixed(2) + ' m/s', bSpeed: v => v.toFixed(2) + ' m/s',
+    timeScale: v => v.toFixed(2) + '×',
+  };
+
+  // ---------- state ----------
+  const state = {
+    simTime: 0,
+    running: true,
+    freezeUntil: 0,
+    cooldownUntil: 0,
+    rogueCount: 0,
+    lastEvent: null,          // {xPx, yPx, xM, ratio, wall}
+    trainA: null, trainB: null,
+    Hs: 1,
+    yScale: 30,               // px per metre (smoothed)
+    dpr: 1, W: 0, H: 0,       // CSS-pixel canvas size
+  };
+
+  // Gaussian-tapered component amplitudes; Σw = 1 so the slider value is the
+  // focused crest height of the whole group.
+  function buildTrain(amp, freq, speed, xOffset) {
+    const half = (N_COMP - 1) / 2;
+    const ws = [];
+    let sum = 0;
+    for (let j = 0; j < N_COMP; j++) {
+      const d = j - half;
+      const w = Math.exp(-(d * d) / (2 * 2.5 * 2.5));
+      ws.push(w); sum += w;
+    }
+    const comps = [];
+    for (let j = 0; j < N_COMP; j++) {
+      const f = freq * (1 + COMP_SPACING * (j - half));
+      comps.push({ a: amp * ws[j] / sum, k: (2 * Math.PI * f) / speed });
+    }
+    return { comps, speed, xOffset };
+  }
+
+  // η(x,t) for a train: all components share the train speed, so the group is a
+  // rigid profile in u = x − c·t; cos() puts the focused crest exactly at u = 0.
+  function trainEta(train, x, t) {
+    const u = x - train.speed * t - train.xOffset;
+    let s = 0;
+    for (const c of train.comps) s += c.a * Math.cos(c.k * u);
+    return s;
+  }
+
+  function rebuild() {
+    const p = readParams();
+    state.trainA = buildTrain(p.aAmp, p.aFreq, p.aSpeed, WORLD_W * 0.3);
+    state.trainB = buildTrain(p.bAmp, p.bFreq, p.bSpeed, WORLD_W * 0.72);
+    let variance = 0;
+    for (const c of state.trainA.comps) variance += c.a * c.a / 2;
+    for (const c of state.trainB.comps) variance += c.a * c.a / 2;
+    state.Hs = 4 * Math.sqrt(variance);
+    $('v-hs').textContent = state.Hs.toFixed(2);
+  }
+
+  function readParams() {
+    const p = {};
+    for (const k in controls) p[k] = parseFloat(controls[k].value);
+    return p;
+  }
+
+  // ---------- rogue detection: zero-down-crossing wave heights ----------
+  // Returns { Hmax, iCrest } over the sampled resultant profile.
+  function scanWaves(eta) {
+    let Hmax = 0, iCrest = 0;
+    let segMax = -Infinity, segMin = Infinity, segMaxI = 0;
+    for (let i = 0; i < eta.length; i++) {
+      const y = eta[i];
+      if (y > segMax) { segMax = y; segMaxI = i; }
+      if (y < segMin) segMin = y;
+      const down = i > 0 && eta[i - 1] >= 0 && y < 0;
+      if (down || i === eta.length - 1) {
+        const h = segMax - segMin;
+        if (h > Hmax) { Hmax = h; iCrest = segMaxI; }
+        segMax = y; segMin = y; segMaxI = i;
+      }
+    }
+    return { Hmax, iCrest };
+  }
+
+  // ---------- rendering ----------
+  function resize() {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    state.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    state.W = rect.width; state.H = rect.height;
+    canvas.width = Math.round(rect.width * state.dpr);
+    canvas.height = Math.round(rect.height * state.dpr);
+  }
+  window.addEventListener('resize', resize);
+
+  function tracePath(samples, midY, scale, step) {
+    ctx.beginPath();
+    for (let i = 0; i < samples.length; i++) {
+      const px = i * step, py = midY - samples[i] * scale;
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+  }
+
+  function draw(etaA, etaB, etaSum, step, wallNow) {
+    const { W, H, dpr } = state;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const midY = H * 0.52;
+
+    // smooth vertical scale toward a target that keeps the tallest plausible crest on screen
+    const p = readParams();
+    const targetScale = (H * 0.36) / Math.max(2.5, (p.aAmp + p.bAmp) * 1.15);
+    state.yScale += (targetScale - state.yScale) * 0.06;
+    const sc = state.yScale;
+
+    // mean sea level + H_s guides
+    ctx.strokeStyle = '#1c3852'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(W, midY); ctx.stroke();
+    ctx.setLineDash([5, 6]);
+    ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
+    ctx.textBaseline = 'bottom';
+    for (const [mult, color, label] of [[0.5, '#2b5375', '±H_s/2'], [1, '#7c3a45', '±H_s  (2·H_s wave zone)']]) {
+      ctx.strokeStyle = color; ctx.fillStyle = color;
+      for (const sgn of [1, -1]) {
+        const y = midY - sgn * mult * state.Hs * sc;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      }
+      ctx.fillText(label, 8, midY - mult * state.Hs * sc - 3);
+    }
+    ctx.setLineDash([]);
+
+    // component trains
+    ctx.lineWidth = 1.4; ctx.globalAlpha = 0.6;
+    ctx.strokeStyle = '#38bdf8'; tracePath(etaA, midY, sc, step); ctx.stroke();
+    ctx.strokeStyle = '#a78bfa'; tracePath(etaB, midY, sc, step); ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // water body under the resultant
+    tracePath(etaSum, midY, sc, step);
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+    const g = ctx.createLinearGradient(0, midY - 60, 0, H);
+    g.addColorStop(0, 'rgba(56,189,248,0.14)');
+    g.addColorStop(1, 'rgba(8,25,45,0.05)');
+    ctx.fillStyle = g; ctx.fill();
+
+    // resultant line — heats up as it approaches rogue territory
+    const ratio = state.Hs > 0 ? state.lastHmax / state.Hs : 0;
+    const hot = Math.min(Math.max((ratio - 1.2) / 0.8, 0), 1);
+    ctx.lineWidth = 2.4;
+    ctx.strokeStyle = hot > 0.75 ? '#f87171' : hot > 0.4 ? '#fbbf24' : '#f1f5f9';
+    ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 6 + hot * 14;
+    tracePath(etaSum, midY, sc, step); ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // convergence marker for the most recent rogue event
+    const ev = state.lastEvent;
+    if (ev && wallNow - ev.wall < MARKER_MS) {
+      const age = (wallNow - ev.wall) / MARKER_MS;
+      const fade = 1 - age;
+      const x = ev.xPx, y = midY - ev.eta * sc;
+      ctx.save();
+      ctx.globalAlpha = fade;
+      ctx.strokeStyle = '#f87171'; ctx.setLineDash([4, 5]); ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+      ctx.setLineDash([]);
+      const pulse = 10 + 26 * ((wallNow / 500) % 1);
+      ctx.beginPath(); ctx.arc(x, y, pulse, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(248,113,113,' + (0.8 * fade * (1 - (pulse - 10) / 26)) + ')';
+      ctx.lineWidth = 2; ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#fca5a5'; ctx.fill();
+      ctx.fillStyle = 'rgba(252,165,165,' + fade + ')';
+      ctx.font = '11px ui-sans-serif, system-ui, sans-serif';
+      ctx.textBaseline = 'alphabetic';
+      const label = 'convergence: ' + ev.ratio.toFixed(2) + '×H_s';
+      ctx.fillText(label, Math.min(x + 10, W - 130), Math.max(y - 12, 14));
+      ctx.restore();
+    }
+  }
+
+  // ---------- HUD / alert ----------
+  function updateHud(Hmax) {
+    const ratio = state.Hs > 0 ? Hmax / state.Hs : 0;
+    $('v-hmax').textContent = Hmax.toFixed(2);
+    $('v-ratio').textContent = ratio.toFixed(2);
+    $('meter-fill').style.width = Math.min(ratio / 2.5, 1) * 100 + '%';
+    const fill = $('meter-fill');
+    fill.style.background = ratio >= 2 ? 'var(--danger)' : ratio >= 1.6 ? 'var(--warn)' : 'var(--accent)';
+    const tile = $('stat-ratio');
+    tile.classList.toggle('rogue', ratio >= 2);
+    tile.classList.toggle('hot', ratio >= 1.6 && ratio < 2);
+  }
+
+  function triggerRogue(iCrest, eta, step, ratio, wallNow) {
+    state.rogueCount++;
+    $('v-count').textContent = state.rogueCount;
+    state.lastEvent = { xPx: iCrest * step, eta: eta[iCrest], ratio, wall: wallNow };
+    state.cooldownUntil = wallNow + COOLDOWN_MS;
+    if ($('g-freeze').checked) state.freezeUntil = wallNow + FREEZE_MS;
+    $('alert-sub').textContent =
+      'H = ' + (ratio * state.Hs).toFixed(1) + ' m  ·  ' + ratio.toFixed(2) + ' × H_s  ·  x ≈ ' +
+      Math.round(iCrest * step / state.W * WORLD_W) + ' m';
+    const overlay = $('alert');
+    overlay.classList.remove('show');
+    void overlay.offsetWidth;            // restart the flash animation
+    overlay.classList.add('show');
+    clearTimeout(triggerRogue._t);
+    triggerRogue._t = setTimeout(() => overlay.classList.remove('show'), 2600);
+  }
+
+  // ---------- reactive educational tip ----------
+  function updateTip(ratio) {
+    const p = readParams();
+    const tip = $('tip');
+    let html;
+    if (Math.abs(p.aFreq - p.bFreq) < 0.015)
+      html = '<b>Beat pattern:</b> the two frequencies are nearly equal, so you get slow beats — broad zones of reinforcement and cancellation — rather than sharp focusing events.';
+    else if (Math.abs(p.aSpeed - p.bSpeed) < 0.6)
+      html = '<b>No lapping:</b> the trains travel at almost the same speed, so their groups barely drift past each other. Increase the speed difference to make convergence events more frequent.';
+    else if (Math.max(p.aAmp, p.bAmp) / Math.min(p.aAmp, p.bAmp) > 3)
+      html = '<b>One-sided sea:</b> one train dominates. Interference is strongest — and rogues most likely — when the two amplitudes are comparable.';
+    else if (ratio >= 2)
+      html = '<b>Rogue conditions:</b> the tallest wave now exceeds 2·H<sub>s</sub>. In a real sea this crest would appear "out of nowhere" and vanish within a minute.';
+    else if (ratio >= 1.7)
+      html = '<b>Close!</b> H<sub>max</sub> is nearing the 2·H<sub>s</sub> threshold — the wave groups are partially aligned. Watch the convergence region on the white line.';
+    else
+      html = '<b>Tip:</b> watch the white line — it is the literal sum of the blue and violet lines at every point. The dashed red lines mark rogue-wave territory (±H<sub>s</sub>).';
+    if (tip.dataset.html !== html) { tip.dataset.html = html; tip.innerHTML = html; }
+  }
+
+  // ---------- main loop ----------
+  let lastWall = performance.now();
+  let tipTimer = 0;
+  state.lastHmax = 0;
+
+  function frame(wallNow) {
+    const dt = Math.min((wallNow - lastWall) / 1000, 0.05);
+    lastWall = wallNow;
+
+    const frozen = wallNow < state.freezeUntil;
+    $('frozen-note').classList.toggle('show', frozen);
+    if (state.running && !frozen) state.simTime += dt * parseFloat(controls.timeScale.value);
+
+    if (state.W === 0) resize();
+    const step = 2;                                 // px between samples
+    const n = Math.max(2, Math.ceil(state.W / step) + 1);
+    const etaA = new Array(n), etaB = new Array(n), etaSum = new Array(n);
+    const mPerPx = WORLD_W / state.W;
+    const t = state.simTime;
+    for (let i = 0; i < n; i++) {
+      const x = i * step * mPerPx;
+      etaA[i] = trainEta(state.trainA, x, t);
+      etaB[i] = trainEta(state.trainB, x, t);
+      etaSum[i] = etaA[i] + etaB[i];
+    }
+
+    const { Hmax, iCrest } = scanWaves(etaSum);
+    state.lastHmax = Hmax;
+    const ratio = state.Hs > 0 ? Hmax / state.Hs : 0;
+    if (ratio >= ROGUE_RATIO && wallNow > state.cooldownUntil && state.running)
+      triggerRogue(iCrest, etaSum, step, ratio, wallNow);
+
+    draw(etaA, etaB, etaSum, step, wallNow);
+    updateHud(Hmax);
+    if (wallNow - tipTimer > 500) { tipTimer = wallNow; updateTip(ratio); }
+
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- wiring ----------
+  function syncOutputs() {
+    for (const k in controls) outputs[k].textContent = fmt[k](parseFloat(controls[k].value));
+  }
+  for (const k in controls) controls[k].addEventListener('input', () => { syncOutputs(); rebuild(); });
+
+  $('btn-pause').addEventListener('click', () => {
+    state.running = !state.running;
+    const b = $('btn-pause');
+    b.setAttribute('aria-pressed', String(!state.running));
+    b.textContent = state.running ? '⏸ Pause' : '▶ Resume';
+  });
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') {
+      e.preventDefault(); $('btn-pause').click();
+    }
+  });
+  $('btn-reset').addEventListener('click', () => {
+    controls.aAmp.value = DEFAULTS.aAmp; controls.aFreq.value = DEFAULTS.aFreq; controls.aSpeed.value = DEFAULTS.aSpeed;
+    controls.bAmp.value = DEFAULTS.bAmp; controls.bFreq.value = DEFAULTS.bFreq; controls.bSpeed.value = DEFAULTS.bSpeed;
+    controls.timeScale.value = DEFAULTS.timeScale;
+    state.simTime = 0; state.rogueCount = 0; state.lastEvent = null;
+    state.cooldownUntil = 0; state.freezeUntil = 0;
+    $('v-count').textContent = '0';
+    syncOutputs(); rebuild();
+  });
+
+  const sidebar = $('sidebar'), btnSidebar = $('btn-sidebar');
+  function setSidebar(open) {
+    sidebar.classList.toggle('hidden', !open);
+    btnSidebar.setAttribute('aria-pressed', String(open));
+  }
+  btnSidebar.addEventListener('click', () => setSidebar(sidebar.classList.contains('hidden')));
+  $('btn-close-sidebar').addEventListener('click', () => setSidebar(false));
+  if (window.innerWidth < 980) setSidebar(false);   // start closed on small screens
+
+  // expose a handle for automated testing
+  window.__sim = { state, scanWaves, trainEta, readParams };
+
+  syncOutputs(); rebuild(); resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
