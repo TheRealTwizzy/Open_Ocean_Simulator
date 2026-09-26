@@ -456,6 +456,12 @@ input[type="range"]::-moz-range-thumb {
   .nogl { bottom: auto; top: 16px; left: auto; right: 16px; width: auto; padding: 6px 10px; }
   .nogl h2 { font-size: 12px; line-height: 1.25; white-space: nowrap; }
 }
+/* under 470 px the top row has no room beside the brand: the tag sits centred in the
+   band between the 2D drawer and the dock's fan (whose raised buttons reach ~59 px up),
+   under the dock's tooltips */
+@media (max-width: 469px) and (max-height: 480px) {
+  .nogl { top: auto; right: auto; bottom: calc(var(--dock-bottom) + 64px); left: 50%; transform: translateX(-50%); z-index: 29; }
+}
 /* desktop, 481-640 px tall: the fallback panel sits just above the 2D drawer (which opens by itself) */
 @media (min-width: 721px) and (min-height: 481px) and (max-height: 640px) {
   .nogl { top: auto; bottom: calc(var(--pop-bottom) + 258px); }
