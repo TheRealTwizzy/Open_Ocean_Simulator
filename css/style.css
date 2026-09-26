@@ -401,6 +401,19 @@ input[type="range"]::-moz-range-thumb {
   }
   .popover > .body { padding-bottom: 20px; }
   @keyframes sheetUp { from { transform: translateY(40px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  /* the dock spans the screen: no outward tilt, and the end bubbles grow inward
+     from their button's outer edge (translate cancels the translateX(-50%)),
+     tails kept over the 44 px buttons' centres */
+  .tip { --ang: 0deg; }
+  .dock li:first-child .tip { left: 0; translate: 50%; }
+  .dock li:last-child .tip { left: auto; right: 0; translate: 50%; }
+  .dock li:first-child .tip::before { left: 21px; }
+  .dock li:last-child .tip::before { left: auto; right: 18px; }
+}
+
+/* touch screens have no Space key to hint at */
+@media (pointer: coarse) {
+  .tip kbd { display: none; }
 }
 
 /* short (landscape phone) viewports: no room for the sparkline, the hint or a tall fallback panel */

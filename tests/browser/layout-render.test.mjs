@@ -279,24 +279,45 @@ test('375x812: nothing spills sideways, and every popover opens as a full-width 
   }
 });
 
-test('375x812: dock tooltips stay on screen when shown', { ...T, todo: 'app bug: the outermost dock tooltips are clipped at phone widths (Pause reaches x < 0, 2D view past innerWidth)' }, async () => {
+test('375x812 and 390x844: dock tooltips stay on screen when shown', T, async () => {
   const page = await newPage(browser, { width: 375, height: 812 });
   try {
     await open(page, server.url, '?q=low');
-    await settle(page);
     const spill = [];
-    const n = await page.locator('#dock .dock-btn').count();
-    for (let i = 0; i < n; i++) {
-      await page.locator('#dock .dock-btn').nth(i).hover({ force: true });
-      await page.waitForFunction(k => getComputedStyle(document.querySelectorAll('#dock .dock-btn')[k].nextElementSibling).opacity === '1',
-        i, { timeout: 30_000, polling: 50 });
-      const tip = await page.evaluate(k => {
-        const t = document.querySelectorAll('#dock .dock-btn')[k].nextElementSibling, r = t.getBoundingClientRect();
-        return { text: t.textContent.trim(), l: r.left, r: r.right, W: innerWidth };
-      }, i);
-      if (tip.l < -0.5 || tip.r > tip.W + 0.5) spill.push(`"${tip.text}" spans x ${tip.l.toFixed(1)}..${tip.r.toFixed(1)} of ${tip.W}`);
+    for (const [w, h] of [[375, 812], [390, 844]]) {
+      if (w !== 375) await setViewport(page, w, h);
+      await settle(page);
+      const n = await page.locator('#dock .dock-btn').count();
+      for (let i = 0; i < n; i++) {
+        await page.locator('#dock .dock-btn').nth(i).hover({ force: true });
+        await page.waitForFunction(k => getComputedStyle(document.querySelectorAll('#dock .dock-btn')[k].nextElementSibling).opacity === '1',
+          i, { timeout: 30_000, polling: 50 });
+        const tip = await page.evaluate(k => {
+          const t = document.querySelectorAll('#dock .dock-btn')[k].nextElementSibling, r = t.getBoundingClientRect();
+          return { text: t.textContent.trim(), l: r.left, r: r.right, W: innerWidth };
+        }, i);
+        if (tip.l < -0.5 || tip.r > tip.W + 0.5) spill.push(`${w}x${h}: "${tip.text}" spans x ${tip.l.toFixed(1)}..${tip.r.toFixed(1)} of ${tip.W}`);
+      }
     }
     assert.deepEqual(spill, []);
+    // a mouse still has a Space key: the hint stays
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#btn-pause + .tip kbd')).display), 'inline');
+  } finally {
+    await page.close();
+  }
+});
+
+test('touch screen: dock tooltips drop the Space key hint', T, async () => {
+  const page = await newPage(browser, { width: 390, height: 844, hasTouch: true, isMobile: true });
+  try {
+    await open(page, server.url, '?q=low');
+    const kbd = () => page.evaluate(() => getComputedStyle(document.querySelector('#btn-pause + .tip kbd')).display);
+    assert.equal(await page.evaluate(() => matchMedia('(pointer: coarse)').matches), true, 'a coarse pointer');
+    assert.equal(await kbd(), 'none');
+    // setPaused() rewrites the label and its <kbd>
+    await evalSim(page, sim => sim.actions.togglePause());
+    assert.equal(await page.textContent('#btn-pause + .tip'), 'Resume space');
+    assert.equal(await kbd(), 'none', 'still hidden after the pause label changes');
   } finally {
     await page.close();
   }
