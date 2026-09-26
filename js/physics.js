@@ -353,6 +353,26 @@ export class Detector {
     }
     return best;
   }
+
+  // Scans the sea time since the previous scan in even steps ending exactly at
+  // t1, at most maxGap apart but no more than maxSteps scans: at high time
+  // speed one frame spans more sea time than the shortest rogue windows
+  // (0.04-0.1 s). maxGap sits just above the default 2.5x span (0.083 s), so
+  // the default speed still scans once. t1 <= t0 (paused, or time reset)
+  // scans t1 alone.
+  // Returns { best, last }: detect() results with their sea time t added; best
+  // has the highest Hmax, last is the scan at t1.
+  scanInterval(t0, t1, maxGap = 0.085, maxSteps = 6) {
+    const steps = t1 > t0 ? Math.min(Math.max(Math.ceil((t1 - t0) / maxGap), 1), maxSteps) : 1;
+    let best = null, last = null;
+    for (let s = 1; s <= steps; s++) {
+      const t = s === steps ? t1 : t0 + (t1 - t0) * s / steps;
+      last = this.detect(t);
+      last.t = t;
+      if (!best || last.Hmax > best.Hmax) best = last;
+    }
+    return { best, last };
+  }
 }
 
 // Splash ripples are decorative: a decaying circular packet, evaluated here for

@@ -5,8 +5,9 @@
   --faint: #86a5c2;
   --cyan: #22d3ee;
   --cyan-soft: rgba(34, 211, 238, 0.35);
-  --glass: rgba(3, 14, 28, 0.6);
-  --glass-2: rgba(6, 22, 42, 0.72);
+  /* opaque enough for --faint text to keep 4.5:1 even over a white sky */
+  --glass: rgba(3, 14, 28, 0.85);
+  --glass-2: rgba(6, 22, 42, 0.9);
   --glass-border: rgba(56, 205, 235, 0.26);
   --glass-border-lt: rgba(120, 230, 255, 0.5);
   --accent: #2dd4bf;
@@ -58,7 +59,6 @@ kbd {
 }
 
 /* ---------- brand + stats ---------- */
-.brand, .stats { background: rgba(3, 14, 28, 0.8); }
 .brand { position: absolute; top: 16px; left: 16px; padding: 9px 14px 8px; }
 .brand h1 { font-size: 15px; font-weight: 650; letter-spacing: 0.3px; line-height: 1.25; }
 .brand p { font-size: 11px; color: var(--muted); }
@@ -243,9 +243,10 @@ kbd {
   display: flex; align-items: center; gap: 10px; padding: 11px 16px;
   border-bottom: 1px solid rgba(56, 205, 235, 0.16);
 }
+/* caustic stripes sweep behind the header text: faint enough for --faint to keep 4.5:1 */
 .popover > header::before, .drawer > header::before {
   content: ""; position: absolute; inset: -60% -30%; pointer-events: none;
-  background: repeating-linear-gradient(112deg, transparent 0 22px, rgba(120, 230, 255, 0.07) 22px 31px, transparent 31px 52px);
+  background: repeating-linear-gradient(112deg, transparent 0 22px, rgba(120, 230, 255, 0.04) 22px 31px, transparent 31px 52px);
   animation: caustic 11s linear infinite;
 }
 @keyframes caustic { from { transform: translateX(-60px); } to { transform: translateX(60px); } }
@@ -401,6 +402,19 @@ input[type="range"]::-moz-range-thumb {
   }
   .popover > .body { padding-bottom: 20px; }
   @keyframes sheetUp { from { transform: translateY(40px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  /* the dock spans the screen: no outward tilt, and the end bubbles grow inward
+     from their button's outer edge (translate cancels the translateX(-50%)),
+     tails kept over the 44 px buttons' centres */
+  .tip { --ang: 0deg; }
+  .dock li:first-child .tip { left: 0; translate: 50%; }
+  .dock li:last-child .tip { left: auto; right: 0; translate: 50%; }
+  .dock li:first-child .tip::before { left: 21px; }
+  .dock li:last-child .tip::before { left: auto; right: 18px; }
+}
+
+/* touch screens have no Space key to hint at */
+@media (pointer: coarse) {
+  .tip kbd { display: none; }
 }
 
 /* short (landscape phone) viewports: no room for the sparkline, the hint or a tall fallback panel */
@@ -409,7 +423,9 @@ input[type="range"]::-moz-range-thumb {
   .buoy-readout { top: 90px; left: auto; right: 16px; width: 246px; padding-bottom: 8px; }
   .hint { display: none; }
   .drawer { height: 150px; }
-  .nogl { top: 12px; padding: 10px 14px; }
+  /* the free corner beside the dock, below the drawer: the top belongs to the brand and stats */
+  .nogl { top: auto; bottom: var(--dock-bottom); left: 16px; transform: none; width: 118px; padding: 8px 10px; }
+  .nogl h2 { font-size: 13px; margin: 0; }
   .nogl p { display: none; }
 }
 

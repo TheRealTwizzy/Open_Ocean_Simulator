@@ -46,9 +46,11 @@ closes any panel.
 - **Significant wave height** H<sub>s</sub> = 4σ with σ² = Σaᵢ²/2 over all
   components, updated live and identical across render-quality presets.
 - **Rogue detection** samples the central 600 × 320 m on an 8 m grid 30 times a
-  second and runs a zero-down-crossing scan along every row and column. A wave
-  whose crest-to-trough height exceeds 2·H<sub>s</sub> fires the alert, drops
-  a beacon on the crest, and briefly freezes the simulation (optional).
+  second, including the sea time between scans (steps of at most 0.085 s, so
+  brief peaks survive high time speeds), and runs a zero-down-crossing scan
+  along every row and column. A wave whose crest-to-trough height exceeds
+  2·H<sub>s</sub> fires the alert, drops a beacon on the crest as drawn, and
+  briefly freezes the simulation at that instant (optional).
 - Crest steepness (Gerstner displacement), foam and splash ripples are visual
   only and never enter H<sub>s</sub> or the detector.
 
@@ -70,7 +72,22 @@ js/ocean.js         Three.js scene: ocean shader, sky, camera, buoy, picking
 js/ui.js            dock, popovers, train cards, stats, alert, 2D drawer
 js/main.js          state, frame loop, detection, interaction, quality
 vendor/             three.module.min.js, OrbitControls.js, Sky.js (r170)
+tests/              unit (node:test) and browser (Playwright) specs, helpers/
+package.json        test scripts and the pinned Playwright version
 ```
 
 Render quality is auto-picked (`?q=low|med|high` overrides it) and steps down,
 up to twice, if the GPU cannot hold ~22 fps. Everything works offline once loaded.
+
+## Tests
+
+```
+npm test                          # physics unit tests (Node 22, no dependencies)
+npm ci                            # once, for the browser tests
+npx playwright install chromium
+npm run test:browser              # boots the app in headless Chromium (SwiftShader WebGL2)
+```
+
+The unit tests check the wave maths in `js/physics.js` directly; the browser
+tests serve the repo over a local HTTP server and drive the real page through
+the `window.__sim` hook. CI runs both on pull requests and pushes to `main`.

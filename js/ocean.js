@@ -47,6 +47,7 @@ void main() {
     vec4 c1 = texelFetch(uComps, ivec2(i, 1), 0);   // phase(t), a·k, Q·a, Q·a·k
     // components too short for the local vertex spacing alias; fade them out
     float lod = rim * (1.0 - smoothstep(2.0, 4.2, c0.y * spacing));
+    if (lod <= 0.0) continue;         // contributes exactly zero: skip its sin/cos
     c0.x *= lod; c1.yzw *= lod;
     float ph = c0.y * (c0.z * x + c0.w * y) + c1.x;
     float cs = cos(ph), sn = sin(ph);
@@ -128,11 +129,25 @@ void main() {
   vec3 toCam = cameraPosition - vWorld;
   float dist = length(toCam);
   vec3 V = toCam / max(dist, 1e-3);
-  // fine ripple detail the mesh cannot carry, fading with distance
-  float detail = (1.0 - smoothstep(40.0, 420.0, dist)) * 0.22;
-  float fine = (1.0 - smoothstep(10.0, 140.0, dist)) * 0.14;
-  vec2 dn = vec2(fbm(vWorld.xz * 0.14 + uTime * 0.05) - 0.5, fbm(vWorld.zx * 0.14 - uTime * 0.04) - 0.5) * detail
-          + vec2(fbm(vWorld.xz * 0.6 + uTime * 0.13) - 0.5, fbm(vWorld.zx * 0.6 - uTime * 0.1) - 0.5) * fine;
+  // fine ripple detail the mesh cannot carry, fading with distance. Zero-weight noise is
+  // branched around, which only saves work on GPUs that skip a branch all lanes agree on
+  // (SwiftShader masks both sides: ~5-15% slower). FLAT keeps these two unbranched, as its
+  // discarded lanes still feed textureCube's derivatives.
+  vec2 dn = vec2(0.0);
+#ifndef FLAT
+  if (dist < 420.0)
+#endif
+  {
+    float detail = (1.0 - smoothstep(40.0, 420.0, dist)) * 0.22;
+    dn = vec2(fbm(vWorld.xz * 0.14 + uTime * 0.05) - 0.5, fbm(vWorld.zx * 0.14 - uTime * 0.04) - 0.5) * detail;
+  }
+#ifndef FLAT
+  if (dist < 140.0)
+#endif
+  {
+    float fine = (1.0 - smoothstep(10.0, 140.0, dist)) * 0.14;
+    dn += vec2(fbm(vWorld.xz * 0.6 + uTime * 0.13) - 0.5, fbm(vWorld.zx * 0.6 - uTime * 0.1) - 0.5) * fine;
+  }
   N = normalize(N + vec3(dn.x, 0.0, dn.y));
 
   float NdV = clamp(dot(N, V), 0.0, 1.0);
@@ -143,7 +158,7 @@ void main() {
 
   float RdL = max(dot(R, uSunDir), 0.0);
   float glint = pow(RdL, 1400.0) * 14.0 + pow(RdL, 120.0) * 0.5;
-  float sparkle = mix(1.0, 0.4 + 1.2 * fbm(vWorld.xz * 0.3 + uTime * 0.09), 1.0 - smoothstep(150.0, 900.0, dist));
+  float sparkle = dist < 900.0 ? mix(1.0, 0.4 + 1.2 * fbm(vWorld.xz * 0.3 + uTime * 0.09), 1.0 - smoothstep(150.0, 900.0, dist)) : 1.0;
   glint *= sparkle;
 
   float hN = vH / max(uHs, 0.2);
@@ -155,7 +170,8 @@ void main() {
 
   float fold = clamp(1.0 - vJ, 0.0, 1.0);
   float foamDrive = smoothstep(uFoamJ.x, uFoamJ.y, fold) + smoothstep(1.0, 1.5, hN) * 0.7 + vRip * 0.8;
-  float n1 = fbm(vWorld.xz * 0.11 + vec2(uTime * 0.025, 0.0));
+  // foamDrive is 0 on the whole flat far plane (vJ = 1, vH = 0, vRip = 0)
+  float n1 = foamDrive > 0.0 ? fbm(vWorld.xz * 0.11 + vec2(uTime * 0.025, 0.0)) : 0.0;
   float foam = clamp(foamDrive * smoothstep(0.32, 0.72, n1) * 1.5, 0.0, 1.0);
   col = mix(col, vec3(0.86, 0.92, 0.97) * (0.55 + 0.55 * NdL), foam);
 
@@ -264,6 +280,11 @@ export class Ocean {
     // baked cube map is a render target whose contents are simply gone
     this.needsRebake = false;
     canvas.addEventListener('webglcontextrestored', () => { this.needsRebake = true; });
+    // three re-creates its geometry bookkeeping on restore but leaves the old
+    // one's dispose listener on the geometry, so setQuality's dispose() would
+    // delete buffers of the dead context. Disposing while lost detaches it (the
+    // deletes are no-ops then); the restored context re-uploads the grid.
+    canvas.addEventListener('webglcontextlost', () => this.mesh.geometry.dispose());
 
     const sun = new THREE.DirectionalLight(0xfff1dc, 2.2);
     sun.position.copy(this.sunDir).multiplyScalar(1000);
@@ -445,14 +466,20 @@ export class Ocean {
     this.buoyMesh.visible = false;
   }
 
-  // Surface point (renderer axes) and elevation at the buoy, on the rendered
-  // mesh (same spacing/rim fades as the shader) including ripples.
+  // Where the material point at sea-plane (x, y) is drawn: renderer axes
+  // (x, h, z) on the rendered mesh (Gerstner displacement with the shader's
+  // spacing/rim fades, plus ripples) and its normal (ripples left out).
+  surfacePoint(x, y, t) {
+    const p = this.sea.displaced(x, y, t, this._pt, this.gridSpacingAt(x, y), this.rimAt(x, y));
+    return { x: p.x, h: p.h + rippleEta(this.ripples, x, y, t), z: p.y, nx: p.nx, ny: p.ny, nz: p.nz };
+  }
+
+  // Surface point and elevation at the buoy.
   buoyState(t) {
     if (!this.buoy) return null;
-    const { x, y } = this.buoy;
-    const p = this.sea.displaced(x, y, t, this._pt, this.gridSpacingAt(x, y), this.rimAt(x, y));
-    const rip = rippleEta(this.ripples, x, y, t);
-    return { x: p.x, h: p.h + rip, z: p.y, eta: p.h + rip, nx: p.nx, ny: p.ny, nz: p.nz };
+    const s = this.surfacePoint(this.buoy.x, this.buoy.y, t);
+    s.eta = s.h;
+    return s;
   }
 
   frame(simTime, wallDt) {

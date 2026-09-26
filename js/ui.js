@@ -273,7 +273,8 @@ export function initUI({ state, sea, actions }) {
   function updateBeacon(wallNow, project) {
     const ev = state.lastEvent, el = $('beacon');
     if (!ev || wallNow - ev.wall > MARKER_MS) { el.hidden = true; return; }
-    const p = project(ev.xM, ev.eta, ev.yM);
+    // the crest as drawn (stamped by main.js), else the detector's linear point
+    const p = project(ev.px ?? ev.xM, ev.ph ?? ev.eta, ev.pz ?? ev.yM);
     if (!p) { el.hidden = true; return; }
     el.hidden = false;
     el.style.left = p.sx + 'px';
@@ -291,6 +292,8 @@ export function initUI({ state, sea, actions }) {
     const box = $('buoy-readout');
     if (!b) { box.hidden = true; hist.length = 0; return; }
     box.hidden = false;
+    // the auto-freeze can step the sea back a little: drop samples from after it
+    while (hist.length && hist[hist.length - 1][0] > simNow) hist.pop();
     if (!hist.length || simNow > hist[hist.length - 1][0]) hist.push([simNow, b.eta]);
     while (hist.length > 1 && simNow - hist[0][0] > 12) hist.shift();
     let mx = -Infinity, mn = Infinity;
