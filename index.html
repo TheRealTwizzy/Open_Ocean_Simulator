@@ -67,6 +67,10 @@
   .btn:hover { border-color: var(--border-lt); background: #10233b; }
   .btn.primary { border-color: #1c5f57; background: #0d2b2c; color: var(--accent); }
   .btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button { padding: 7px 14px; font-size: 13px; font-weight: 600; color: var(--muted); background: var(--panel); }
+  .seg button[aria-pressed="true"] { color: var(--accent); background: #0d2b2c; }
+  .seg button:disabled { opacity: 0.4; cursor: not-allowed; }
 
   /* ---------- canvas stage ---------- */
   .stage {
@@ -75,6 +79,9 @@
     background: linear-gradient(180deg, #04101f 0%, #061c33 55%, #04101f 100%);
   }
   canvas { display: block; width: 100%; height: 100%; }
+  #sea3 { touch-action: none; cursor: grab; }
+  #sea3:active { cursor: grabbing; }
+  .hidden { display: none !important; }
 
   .legend {
     position: absolute; top: 10px; left: 12px; display: flex; gap: 14px; flex-wrap: wrap;
@@ -83,6 +90,20 @@
   }
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
   .swatch { width: 16px; height: 3px; border-radius: 2px; display: inline-block; }
+  .hint3d {
+    position: absolute; top: 10px; right: 12px; font-size: 11px; color: var(--faint);
+    background: #030a1499; padding: 3px 9px; border-radius: 6px; pointer-events: none;
+  }
+
+  .beacon {
+    position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none;
+    border-radius: 50%; background: #fca5a5; box-shadow: 0 0 12px #ef4444;
+  }
+  .beacon::after {
+    content: ""; position: absolute; inset: -12px; border: 2px solid var(--danger);
+    border-radius: 50%; animation: beaconPulse 1.1s ease-out infinite;
+  }
+  @keyframes beaconPulse { 0% { transform: scale(0.4); opacity: 1; } 100% { transform: scale(1.6); opacity: 0; } }
 
   .alert-overlay {
     position: absolute; inset: 0; display: none; pointer-events: none;
@@ -98,7 +119,7 @@
   .alert-banner .title { font-size: 17px; font-weight: 750; letter-spacing: 1.5px; color: var(--danger); }
   .alert-banner .sub { font-size: 12px; color: #fca5a5; margin-top: 2px; font-variant-numeric: tabular-nums; }
   @keyframes alertFlash { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
-  @media (prefers-reduced-motion: reduce) { .alert-overlay.show { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .alert-overlay.show { animation: none; } .beacon::after { animation: none; } }
 
   .frozen-note {
     position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
@@ -193,6 +214,10 @@
         </div>
         <div class="stat"><div class="k">Rogue events</div><div class="v" id="v-count">0</div></div>
       </div>
+      <div class="seg" role="group" aria-label="View mode">
+        <button id="btn-2d" aria-pressed="false">2D</button>
+        <button id="btn-3d" aria-pressed="false">3D</button>
+      </div>
       <button class="btn primary" id="btn-pause" aria-pressed="false">⏸ Pause</button>
       <button class="btn" id="btn-reset">↺ Reset</button>
       <button class="btn" id="btn-sidebar" aria-pressed="true">ⓘ Physics</button>
@@ -200,11 +225,18 @@
 
     <div class="stage">
       <canvas id="sea"></canvas>
-      <div class="legend">
+      <canvas id="sea3" class="hidden"></canvas>
+      <div class="legend" id="legend-2d">
         <span><i class="swatch" style="background:var(--wave-a)"></i>Wave Train A</span>
         <span><i class="swatch" style="background:var(--wave-b)"></i>Wave Train B</span>
         <span><i class="swatch" style="background:var(--wave-sum);height:4px"></i>Resulting Sea State (A + B)</span>
       </div>
+      <div class="legend hidden" id="legend-3d">
+        <span><i class="swatch" style="background:linear-gradient(90deg,#04121f,#4d9fd9)"></i>Surface height (A + B)</span>
+        <span><i class="swatch" style="background:#f88c59"></i>Crest above H<sub>s</sub> — rogue zone</span>
+      </div>
+      <div class="hint3d hidden" id="hint3d">drag to rotate</div>
+      <div class="beacon hidden" id="beacon"></div>
       <div class="alert-overlay" id="alert">
         <div class="alert-banner">
           <div class="title">⚠ ROGUE WAVE DETECTED</div>
@@ -223,6 +255,8 @@
           <input type="range" id="a-freq" min="0.05" max="0.3" step="0.005" value="0.15"></div>
         <div class="ctl"><label for="a-speed">Propagation speed <output id="a-speed-v"></output></label>
           <input type="range" id="a-speed" min="2" max="16" step="0.25" value="10.5"></div>
+        <div class="ctl"><label for="a-dir">Direction (heading) <output id="a-dir-v"></output></label>
+          <input type="range" id="a-dir" min="-60" max="60" step="5" value="0"></div>
       </div>
       <div class="card train-b">
         <h2><span class="dot" style="background:var(--wave-b)"></span>Wave Train B</h2>
@@ -232,6 +266,8 @@
           <input type="range" id="b-freq" min="0.05" max="0.3" step="0.005" value="0.11"></div>
         <div class="ctl"><label for="b-speed">Propagation speed <output id="b-speed-v"></output></label>
           <input type="range" id="b-speed" min="2" max="16" step="0.25" value="6.5"></div>
+        <div class="ctl"><label for="b-dir">Direction (heading) <output id="b-dir-v"></output></label>
+          <input type="range" id="b-dir" min="-60" max="60" step="5" value="30"></div>
       </div>
       <div class="card global">
         <h2><span class="dot" style="background:var(--accent)"></span>Simulation</h2>
@@ -242,7 +278,7 @@
           <input type="checkbox" id="g-freeze" checked>
         </div>
         <div class="toggle-row" style="margin-top:6px">
-          <span style="font-size:11.5px;color:var(--faint)">Each train is a narrow-band group of 7 components — the honest model of a storm swell. See the Physics panel.</span>
+          <span style="font-size:11.5px;color:var(--faint)">Each train is a narrow-band group of 7 components — the honest model of a storm swell. Direction sliders create crossing seas in 3D. See the Physics panel.</span>
         </div>
       </div>
     </div>
@@ -251,19 +287,25 @@
   <aside class="sidebar" id="sidebar" aria-label="Physics explainer">
     <button class="close" id="btn-close-sidebar" title="Close panel">✕</button>
     <h2>How rogue waves form</h2>
-    <div class="tip" id="tip"><b>Tip:</b> watch the white line — it is the literal sum of the blue and violet lines at every point.</div>
+    <div class="tip" id="tip"><b>Tip:</b> in 2D, the white line is the literal sum of the blue and violet lines at every point.</div>
 
     <section>
       <h3>Superposition</h3>
-      <p>The ocean surface obeys (to first order) a linear wave equation, so overlapping wave systems simply add. At every horizontal position <span class="eq" style="display:inline;padding:1px 6px">x</span>:</p>
-      <div class="eq"><span class="r">η(x,t)</span> = <span class="a">η_A(x,t)</span> + <span class="b">η_B(x,t)</span></div>
-      <p>Where crests of <span class="a">A</span> and <span class="b">B</span> coincide, the surface elevations reinforce — <em>constructive interference</em>. Where a crest meets a trough, they cancel.</p>
+      <p>The ocean surface obeys (to first order) a linear wave equation, so overlapping wave systems simply add. At every horizontal position:</p>
+      <div class="eq"><span class="r">η(x,y,t)</span> = <span class="a">η_A(x,y,t)</span> + <span class="b">η_B(x,y,t)</span></div>
+      <p>Where crests of <span class="a">A</span> and <span class="b">B</span> coincide, the surface elevations reinforce — <em>constructive interference</em>. Where a crest meets a trough, they cancel. The 2D view shows a single slice through the sea; the 3D view shows the whole surface.</p>
     </section>
 
     <section>
       <h3>Linear focusing</h3>
       <p>A real storm swell is not one sine wave but a <em>band</em> of components with slightly different frequencies. Here each train bundles 7 such components. Most of the time their phases are scrambled and the sea looks moderate — the energy is spread out.</p>
       <p>Occasionally the components drift into step at one point in space: their amplitudes add coherently and a single towering crest appears, then vanishes as the phases drift apart again. That transient pile-up of otherwise ordinary wave energy is <em>linear (dispersive) focusing</em> — the leading explanation for many deep-water rogue waves.</p>
+    </section>
+
+    <section>
+      <h3>Crossing seas — why the 3D view matters</h3>
+      <p>The direction sliders point each train along its own heading. When the two systems cross at an angle, their crest <em>lines</em> intersect at a single moving point — and only there do the two systems fully reinforce. In the 3D view you can watch that intersection sweep across the sea and occasionally erupt.</p>
+      <p>Crossing wind-sea and swell is a documented real-world rogue mechanism: analyses of the Draupner wave (25.6 m in a 12 m sea, 1 January 1995 — the first rogue ever instrumentally recorded) suggest two wave systems crossing at a large angle.</p>
     </section>
 
     <section>
@@ -278,12 +320,12 @@
       <div class="eq">H_s = 4·σ,&nbsp;&nbsp; σ² = Σ aᵢ²⁄2</div>
       <p>H<sub>s</sub> is computed live from the component amplitudes of both trains. A wave qualifies as <span class="r">rogue</span> when its crest-to-trough height exceeds twice the significant height:</p>
       <div class="eq">H_max &gt; 2·H_s</div>
-      <p>The dashed guide lines mark elevations of ±H<sub>s</sub>∕2 and ±H<sub>s</sub>: a roughly symmetric wave touching the outer ±H<sub>s</sub> lines has a height near 2·H<sub>s</sub> — rogue territory.</p>
+      <p>In 2D, dashed guide lines mark elevations of ±H<sub>s</sub>∕2 and ±H<sub>s</sub>. In 3D, any crest climbing above the H<sub>s</sub> elevation glows orange — rogue territory.</p>
     </section>
 
     <section>
       <h3>Why rogues are rare</h3>
-      <p>Two pure sine waves can never exceed 2·H<sub>s</sub> — the statistics forbid it. It takes many components conspiring: with 14 components here, perfect alignment is possible but improbable, which is exactly why real rogue waves are rare, sudden, and were dismissed as sailors' legend until the Draupner platform measured one on 1 January 1995 (25.6 m in a 12 m sea).</p>
+      <p>Two pure sine waves can never exceed 2·H<sub>s</sub> — the statistics forbid it. It takes many components conspiring: with 14 components here, perfect alignment is possible but improbable, which is exactly why real rogue waves are rare, sudden, and were dismissed as sailors' legend until the Draupner measurement.</p>
       <p><b>Recipe to hunt one:</b> keep the two amplitudes similar, keep a healthy speed difference between the trains, and let the simulation run. Watch the H<sub>max</sub>∕H<sub>s</sub> meter approach the red tick.</p>
     </section>
   </aside>
@@ -293,7 +335,8 @@
 'use strict';
 (() => {
   // ---------- world / model constants ----------
-  const WORLD_W = 600;          // metres of ocean shown across the canvas
+  const WORLD_W = 600;          // metres of ocean along x
+  const WORLD_D = 320;          // metres of ocean along y (3D view depth)
   const N_COMP = 7;             // sinusoidal components per wave train
   const COMP_SPACING = 0.1;     // fractional frequency spacing between adjacent components
   const ROGUE_RATIO = 2.0;      // H_max / H_s threshold (standard oceanographic definition)
@@ -302,28 +345,30 @@
   const MARKER_MS = 3500;
 
   const DEFAULTS = {
-    aAmp: 1.8, aFreq: 0.15, aSpeed: 10.5,
-    bAmp: 1.6, bFreq: 0.11, bSpeed: 6.5,
+    aAmp: 1.8, aFreq: 0.15, aSpeed: 10.5, aDir: 0,
+    bAmp: 1.6, bFreq: 0.11, bSpeed: 6.5, bDir: 30,
     timeScale: 2.5,
   };
 
   const $ = id => document.getElementById(id);
   const canvas = $('sea'), ctx = canvas.getContext('2d');
+  const canvas3 = $('sea3');
 
   const controls = {
-    aAmp: $('a-amp'), aFreq: $('a-freq'), aSpeed: $('a-speed'),
-    bAmp: $('b-amp'), bFreq: $('b-freq'), bSpeed: $('b-speed'),
+    aAmp: $('a-amp'), aFreq: $('a-freq'), aSpeed: $('a-speed'), aDir: $('a-dir'),
+    bAmp: $('b-amp'), bFreq: $('b-freq'), bSpeed: $('b-speed'), bDir: $('b-dir'),
     timeScale: $('g-speed'),
   };
   const outputs = {
-    aAmp: $('a-amp-v'), aFreq: $('a-freq-v'), aSpeed: $('a-speed-v'),
-    bAmp: $('b-amp-v'), bFreq: $('b-freq-v'), bSpeed: $('b-speed-v'),
+    aAmp: $('a-amp-v'), aFreq: $('a-freq-v'), aSpeed: $('a-speed-v'), aDir: $('a-dir-v'),
+    bAmp: $('b-amp-v'), bFreq: $('b-freq-v'), bSpeed: $('b-speed-v'), bDir: $('b-dir-v'),
     timeScale: $('g-speed-v'),
   };
   const fmt = {
     aAmp: v => v.toFixed(2) + ' m', bAmp: v => v.toFixed(2) + ' m',
     aFreq: v => v.toFixed(3) + ' Hz', bFreq: v => v.toFixed(3) + ' Hz',
     aSpeed: v => v.toFixed(2) + ' m/s', bSpeed: v => v.toFixed(2) + ' m/s',
+    aDir: v => v.toFixed(0) + '°', bDir: v => v.toFixed(0) + '°',
     timeScale: v => v.toFixed(2) + '×',
   };
 
@@ -331,19 +376,21 @@
   const state = {
     simTime: 0,
     running: true,
+    mode: 'flat',             // 'flat' (2D) | 'surf' (3D)
     freezeUntil: 0,
     cooldownUntil: 0,
     rogueCount: 0,
-    lastEvent: null,          // {xPx, yPx, xM, ratio, wall}
+    lastEvent: null,          // {xM, yM, eta, ratio, wall}
     trainA: null, trainB: null,
     Hs: 1,
-    yScale: 30,               // px per metre (smoothed)
+    lastHmax: 0,
+    yScale: 30,               // 2D px per metre (smoothed)
     dpr: 1, W: 0, H: 0,       // CSS-pixel canvas size
   };
 
   // Gaussian-tapered component amplitudes; Σw = 1 so the slider value is the
   // focused crest height of the whole group.
-  function buildTrain(amp, freq, speed, xOffset) {
+  function buildTrain(amp, freq, speed, dirDeg, xOffset) {
     const half = (N_COMP - 1) / 2;
     const ws = [];
     let sum = 0;
@@ -357,13 +404,15 @@
       const f = freq * (1 + COMP_SPACING * (j - half));
       comps.push({ a: amp * ws[j] / sum, k: (2 * Math.PI * f) / speed });
     }
-    return { comps, speed, xOffset };
+    const th = dirDeg * Math.PI / 180;
+    return { comps, speed, xOffset, cos: Math.cos(th), sin: Math.sin(th) };
   }
 
-  // η(x,t) for a train: all components share the train speed, so the group is a
-  // rigid profile in u = x − c·t; cos() puts the focused crest exactly at u = 0.
-  function trainEta(train, x, t) {
-    const u = x - train.speed * t - train.xOffset;
+  // η(x,y,t) for a train: all components share the train speed, so the group is
+  // a rigid profile in u = x·cosθ + y·sinθ − c·t; cos() puts the focused crest
+  // line exactly at u = 0.
+  function trainEta(train, x, y, t) {
+    const u = x * train.cos + y * train.sin - train.speed * t - train.xOffset;
     let s = 0;
     for (const c of train.comps) s += c.a * Math.cos(c.k * u);
     return s;
@@ -371,8 +420,8 @@
 
   function rebuild() {
     const p = readParams();
-    state.trainA = buildTrain(p.aAmp, p.aFreq, p.aSpeed, WORLD_W * 0.3);
-    state.trainB = buildTrain(p.bAmp, p.bFreq, p.bSpeed, WORLD_W * 0.72);
+    state.trainA = buildTrain(p.aAmp, p.aFreq, p.aSpeed, p.aDir, WORLD_W * 0.3);
+    state.trainB = buildTrain(p.bAmp, p.bFreq, p.bSpeed, p.bDir, WORLD_W * 0.72);
     let variance = 0;
     for (const c of state.trainA.comps) variance += c.a * c.a / 2;
     for (const c of state.trainB.comps) variance += c.a * c.a / 2;
@@ -387,7 +436,7 @@
   }
 
   // ---------- rogue detection: zero-down-crossing wave heights ----------
-  // Returns { Hmax, iCrest } over the sampled resultant profile.
+  // Returns { Hmax, iCrest } over one sampled profile.
   function scanWaves(eta) {
     let Hmax = 0, iCrest = 0;
     let segMax = -Infinity, segMin = Infinity, segMaxI = 0;
@@ -405,13 +454,32 @@
     return { Hmax, iCrest };
   }
 
-  // ---------- rendering ----------
+  // Scan several rows across the sea; return the tallest wave and its world position.
+  function detect(t, rows, nSamples) {
+    let best = { Hmax: 0, xM: 0, yM: 0, eta: 0 };
+    const eta = new Array(nSamples);
+    for (const yM of rows) {
+      for (let i = 0; i < nSamples; i++) {
+        const x = i / (nSamples - 1) * WORLD_W;
+        eta[i] = trainEta(state.trainA, x, yM, t) + trainEta(state.trainB, x, yM, t);
+      }
+      const { Hmax, iCrest } = scanWaves(eta);
+      if (Hmax > best.Hmax)
+        best = { Hmax, xM: iCrest / (nSamples - 1) * WORLD_W, yM, eta: eta[iCrest] };
+    }
+    return best;
+  }
+
+  // ---------- 2D rendering ----------
   function resize() {
     const rect = canvas.parentElement.getBoundingClientRect();
     state.dpr = Math.min(window.devicePixelRatio || 1, 2);
     state.W = rect.width; state.H = rect.height;
     canvas.width = Math.round(rect.width * state.dpr);
     canvas.height = Math.round(rect.height * state.dpr);
+    canvas3.width = canvas.width;
+    canvas3.height = canvas.height;
+    if (gl) gl.viewport(0, 0, canvas3.width, canvas3.height);
   }
   window.addEventListener('resize', resize);
 
@@ -423,13 +491,23 @@
     }
   }
 
-  function draw(etaA, etaB, etaSum, step, wallNow) {
+  function draw2d(t, wallNow) {
     const { W, H, dpr } = state;
+    const step = 2;
+    const n = Math.max(2, Math.ceil(W / step) + 1);
+    const etaA = new Array(n), etaB = new Array(n), etaSum = new Array(n);
+    const mPerPx = WORLD_W / W;
+    for (let i = 0; i < n; i++) {
+      const x = i * step * mPerPx;
+      etaA[i] = trainEta(state.trainA, x, 0, t);
+      etaB[i] = trainEta(state.trainB, x, 0, t);
+      etaSum[i] = etaA[i] + etaB[i];
+    }
+
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     const midY = H * 0.52;
 
-    // smooth vertical scale toward a target that keeps the tallest plausible crest on screen
     const p = readParams();
     const targetScale = (H * 0.36) / Math.max(2.5, (p.aAmp + p.bAmp) * 1.15);
     state.yScale += (targetScale - state.yScale) * 0.06;
@@ -479,7 +557,7 @@
     if (ev && wallNow - ev.wall < MARKER_MS) {
       const age = (wallNow - ev.wall) / MARKER_MS;
       const fade = 1 - age;
-      const x = ev.xPx, y = midY - ev.eta * sc;
+      const x = ev.xM / WORLD_W * W, y = midY - ev.eta * sc;
       ctx.save();
       ctx.globalAlpha = fade;
       ctx.strokeStyle = '#f87171'; ctx.setLineDash([4, 5]); ctx.lineWidth = 1.2;
@@ -494,34 +572,247 @@
       ctx.fillStyle = 'rgba(252,165,165,' + fade + ')';
       ctx.font = '11px ui-sans-serif, system-ui, sans-serif';
       ctx.textBaseline = 'alphabetic';
-      const label = 'convergence: ' + ev.ratio.toFixed(2) + '×H_s';
-      ctx.fillText(label, Math.min(x + 10, W - 130), Math.max(y - 12, 14));
+      ctx.fillText('convergence: ' + ev.ratio.toFixed(2) + '×H_s', Math.min(x + 10, W - 130), Math.max(y - 12, 14));
       ctx.restore();
     }
   }
+
+  // ---------- 3D rendering (hand-rolled WebGL, wave sum in the vertex shader) ----------
+  let gl = null, glOk = false, prog = null, uni = {}, nIndices = 0;
+  const cam = { yaw: 0.55, pitch: 0.62, dist: 640, zScale: 12 };
+
+  const VSH = `
+attribute vec2 aPos;
+uniform float uT, uZ;
+uniform float uAa[7]; uniform float uAk[7];
+uniform float uBa[7]; uniform float uBk[7];
+uniform vec4 uAtr, uBtr;          // cosθ, sinθ, speed, xOffset
+uniform mat4 uMVP;
+varying float vEta; varying vec3 vN; varying vec3 vPos;
+void main() {
+  float ua = aPos.x*uAtr.x + aPos.y*uAtr.y - uAtr.z*uT - uAtr.w;
+  float ub = aPos.x*uBtr.x + aPos.y*uBtr.y - uBtr.z*uT - uBtr.w;
+  float h = 0.0, da = 0.0, db = 0.0;
+  for (int i = 0; i < 7; i++) {
+    h  += uAa[i]*cos(uAk[i]*ua) + uBa[i]*cos(uBk[i]*ub);
+    da -= uAa[i]*uAk[i]*sin(uAk[i]*ua);
+    db -= uBa[i]*uBk[i]*sin(uBk[i]*ub);
+  }
+  float dx = da*uAtr.x + db*uBtr.x;
+  float dy = da*uAtr.y + db*uBtr.y;
+  vN = normalize(vec3(-dx*uZ, -dy*uZ, 1.0));
+  vEta = h;
+  vPos = vec3(aPos, h*uZ);
+  gl_Position = uMVP * vec4(vPos, 1.0);
+}`;
+  const FSH = `
+precision mediump float;
+varying float vEta; varying vec3 vN; varying vec3 vPos;
+uniform float uHs; uniform vec3 uEye;
+void main() {
+  vec3 N = normalize(vN);
+  vec3 L = normalize(vec3(0.35, 0.3, 0.85));
+  vec3 V = normalize(uEye - vPos);
+  float diff = max(dot(N, L), 0.0);
+  float spec = pow(max(dot(N, normalize(L + V)), 0.0), 60.0) * 0.45;
+  float fres = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+  float t = clamp(vEta / (uHs * 1.2) * 0.5 + 0.5, 0.0, 1.0);
+  vec3 col = mix(vec3(0.016, 0.09, 0.18), vec3(0.30, 0.62, 0.85), t);
+  float rz = smoothstep(uHs * 0.85, uHs * 1.05, vEta);   // crest entering rogue zone
+  col = mix(col, vec3(0.97, 0.55, 0.35), rz * 0.85);
+  col = col * (0.35 + 0.75 * diff) + vec3(spec) + fres * vec3(0.06, 0.12, 0.18);
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+  // minimal mat4 helpers (column-major)
+  function matPerspective(fov, aspect, near, far) {
+    const f = 1 / Math.tan(fov / 2), nf = 1 / (near - far);
+    return [f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0];
+  }
+  function matLookAt(eye, c, up) {
+    let zx = eye[0] - c[0], zy = eye[1] - c[1], zz = eye[2] - c[2];
+    let l = Math.hypot(zx, zy, zz); zx /= l; zy /= l; zz /= l;
+    let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+    l = Math.hypot(xx, xy, xz); xx /= l; xy /= l; xz /= l;
+    const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    return [xx, yx, zx, 0, xy, yy, zy, 0, xz, yz, zz, 0,
+      -(xx * eye[0] + xy * eye[1] + xz * eye[2]),
+      -(yx * eye[0] + yy * eye[1] + yz * eye[2]),
+      -(zx * eye[0] + zy * eye[1] + zz * eye[2]), 1];
+  }
+  function matMul(a, b) {
+    const o = new Array(16);
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+      o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+    }
+    return o;
+  }
+
+  function initGL() {
+    if (gl) return glOk;
+    gl = canvas3.getContext('webgl', { antialias: true });
+    if (!gl) { glOk = false; return false; }
+    function sh(type, src) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      return s;
+    }
+    try {
+      prog = gl.createProgram();
+      gl.attachShader(prog, sh(gl.VERTEX_SHADER, VSH));
+      gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FSH));
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+    } catch (e) {
+      console.warn('WebGL init failed:', e.message);
+      glOk = false; return false;
+    }
+    gl.useProgram(prog);
+    for (const n of ['uT', 'uZ', 'uAa', 'uAk', 'uBa', 'uBk', 'uAtr', 'uBtr', 'uMVP', 'uHs', 'uEye'])
+      uni[n] = gl.getUniformLocation(prog, n);
+
+    // grid mesh over [0,WORLD_W] × [-WORLD_D/2, WORLD_D/2]
+    const NX = 181, NY = 101;
+    const verts = new Float32Array(NX * NY * 2);
+    let vi = 0;
+    for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
+      verts[vi++] = i / (NX - 1) * WORLD_W;
+      verts[vi++] = (j / (NY - 1) - 0.5) * WORLD_D;
+    }
+    const idx = new Uint16Array((NX - 1) * (NY - 1) * 6);
+    let ii = 0;
+    for (let j = 0; j < NY - 1; j++) for (let i = 0; i < NX - 1; i++) {
+      const a = j * NX + i, b = a + 1, c = a + NX, d = c + 1;
+      idx[ii++] = a; idx[ii++] = c; idx[ii++] = b;
+      idx[ii++] = b; idx[ii++] = c; idx[ii++] = d;
+    }
+    nIndices = idx.length;
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, 'aPos');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    const ibo = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+    gl.enable(gl.DEPTH_TEST);
+    gl.clearColor(0.012, 0.04, 0.08, 1);
+    gl.viewport(0, 0, canvas3.width, canvas3.height);
+    glOk = true;
+    return true;
+  }
+
+  let lastMVP = null;
+  function draw3d(t, wallNow) {
+    const p = readParams();
+    const targetZ = 55 / Math.max(2.5, p.aAmp + p.bAmp);
+    cam.zScale += (targetZ - cam.zScale) * 0.06;
+
+    const center = [WORLD_W / 2, 0, 0];
+    const eye = [
+      center[0] + cam.dist * Math.cos(cam.pitch) * Math.sin(cam.yaw),
+      center[1] - cam.dist * Math.cos(cam.pitch) * Math.cos(cam.yaw),
+      center[2] + cam.dist * Math.sin(cam.pitch),
+    ];
+    const proj = matPerspective(0.9, canvas3.width / canvas3.height, 10, 4000);
+    const mvp = matMul(proj, matLookAt(eye, center, [0, 0, 1]));
+    lastMVP = mvp;
+
+    const A = state.trainA, B = state.trainB;
+    gl.uniform1f(uni.uT, t);
+    gl.uniform1f(uni.uZ, cam.zScale);
+    gl.uniform1f(uni.uHs, state.Hs);
+    gl.uniform3f(uni.uEye, eye[0], eye[1], eye[2]);
+    gl.uniform1fv(uni.uAa, A.comps.map(c => c.a));
+    gl.uniform1fv(uni.uAk, A.comps.map(c => c.k));
+    gl.uniform1fv(uni.uBa, B.comps.map(c => c.a));
+    gl.uniform1fv(uni.uBk, B.comps.map(c => c.k));
+    gl.uniform4f(uni.uAtr, A.cos, A.sin, A.speed, A.xOffset);
+    gl.uniform4f(uni.uBtr, B.cos, B.sin, B.speed, B.xOffset);
+    gl.uniformMatrix4fv(uni.uMVP, false, mvp);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.drawElements(gl.TRIANGLES, nIndices, gl.UNSIGNED_SHORT, 0);
+
+    updateBeacon(wallNow);
+  }
+
+  // DOM beacon at the projected convergence point
+  function updateBeacon(wallNow) {
+    const ev = state.lastEvent, el = $('beacon');
+    if (state.mode !== 'surf' || !ev || wallNow - ev.wall > MARKER_MS || !lastMVP) {
+      el.classList.add('hidden'); return;
+    }
+    const m = lastMVP;
+    const px = ev.xM, py = ev.yM, pz = ev.eta * cam.zScale;
+    const cx = m[0] * px + m[4] * py + m[8] * pz + m[12];
+    const cy = m[1] * px + m[5] * py + m[9] * pz + m[13];
+    const cw = m[3] * px + m[7] * py + m[11] * pz + m[15];
+    if (cw <= 0) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    el.style.left = ((cx / cw * 0.5 + 0.5) * state.W) + 'px';
+    el.style.top = ((-cy / cw * 0.5 + 0.5) * state.H) + 'px';
+    el.style.opacity = String(1 - (wallNow - ev.wall) / MARKER_MS);
+  }
+
+  // drag to rotate
+  let dragging = false, lastPX = 0, lastPY = 0;
+  canvas3.addEventListener('pointerdown', e => {
+    dragging = true; lastPX = e.clientX; lastPY = e.clientY;
+    canvas3.setPointerCapture(e.pointerId);
+  });
+  canvas3.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    cam.yaw += (e.clientX - lastPX) * 0.005;
+    cam.pitch = Math.min(1.35, Math.max(0.15, cam.pitch + (e.clientY - lastPY) * 0.005));
+    lastPX = e.clientX; lastPY = e.clientY;
+  });
+  canvas3.addEventListener('pointerup', () => { dragging = false; });
+
+  // ---------- view mode ----------
+  function setMode(mode) {
+    if (mode === 'surf' && !initGL()) {
+      $('btn-3d').disabled = true;
+      $('btn-3d').title = 'WebGL unavailable in this browser';
+      mode = 'flat';
+    }
+    state.mode = mode;
+    const surf = mode === 'surf';
+    canvas.classList.toggle('hidden', surf);
+    canvas3.classList.toggle('hidden', !surf);
+    $('legend-2d').classList.toggle('hidden', surf);
+    $('legend-3d').classList.toggle('hidden', !surf);
+    $('hint3d').classList.toggle('hidden', !surf);
+    $('btn-2d').setAttribute('aria-pressed', String(!surf));
+    $('btn-3d').setAttribute('aria-pressed', String(surf));
+    if (!surf) $('beacon').classList.add('hidden');
+  }
+  $('btn-2d').addEventListener('click', () => setMode('flat'));
+  $('btn-3d').addEventListener('click', () => setMode('surf'));
 
   // ---------- HUD / alert ----------
   function updateHud(Hmax) {
     const ratio = state.Hs > 0 ? Hmax / state.Hs : 0;
     $('v-hmax').textContent = Hmax.toFixed(2);
     $('v-ratio').textContent = ratio.toFixed(2);
-    $('meter-fill').style.width = Math.min(ratio / 2.5, 1) * 100 + '%';
     const fill = $('meter-fill');
+    fill.style.width = Math.min(ratio / 2.5, 1) * 100 + '%';
     fill.style.background = ratio >= 2 ? 'var(--danger)' : ratio >= 1.6 ? 'var(--warn)' : 'var(--accent)';
     const tile = $('stat-ratio');
     tile.classList.toggle('rogue', ratio >= 2);
     tile.classList.toggle('hot', ratio >= 1.6 && ratio < 2);
   }
 
-  function triggerRogue(iCrest, eta, step, ratio, wallNow) {
+  function triggerRogue(best, ratio, wallNow) {
     state.rogueCount++;
     $('v-count').textContent = state.rogueCount;
-    state.lastEvent = { xPx: iCrest * step, eta: eta[iCrest], ratio, wall: wallNow };
+    state.lastEvent = { xM: best.xM, yM: best.yM, eta: best.eta, ratio, wall: wallNow };
     state.cooldownUntil = wallNow + COOLDOWN_MS;
     if ($('g-freeze').checked) state.freezeUntil = wallNow + FREEZE_MS;
     $('alert-sub').textContent =
       'H = ' + (ratio * state.Hs).toFixed(1) + ' m  ·  ' + ratio.toFixed(2) + ' × H_s  ·  x ≈ ' +
-      Math.round(iCrest * step / state.W * WORLD_W) + ' m';
+      Math.round(best.xM) + ' m';
     const overlay = $('alert');
     overlay.classList.remove('show');
     void overlay.offsetWidth;            // restart the flash animation
@@ -544,16 +835,18 @@
     else if (ratio >= 2)
       html = '<b>Rogue conditions:</b> the tallest wave now exceeds 2·H<sub>s</sub>. In a real sea this crest would appear "out of nowhere" and vanish within a minute.';
     else if (ratio >= 1.7)
-      html = '<b>Close!</b> H<sub>max</sub> is nearing the 2·H<sub>s</sub> threshold — the wave groups are partially aligned. Watch the convergence region on the white line.';
+      html = '<b>Close!</b> H<sub>max</sub> is nearing the 2·H<sub>s</sub> threshold — the wave groups are partially aligned. Watch the convergence region.';
+    else if (state.mode === 'surf' && Math.abs(p.aDir - p.bDir) >= 20)
+      html = '<b>Crossing seas:</b> the trains travel ' + Math.abs(p.aDir - p.bDir).toFixed(0) +
+        '° apart, so their crest lines only fully reinforce where they intersect — watch that moving intersection point. This is the leading explanation for the Draupner rogue wave.';
     else
-      html = '<b>Tip:</b> watch the white line — it is the literal sum of the blue and violet lines at every point. The dashed red lines mark rogue-wave territory (±H<sub>s</sub>).';
+      html = '<b>Tip:</b> in 2D, the white line is the literal sum of the blue and violet lines at every point. In 3D, crests glowing orange have climbed above H<sub>s</sub> — rogue territory.';
     if (tip.dataset.html !== html) { tip.dataset.html = html; tip.innerHTML = html; }
   }
 
   // ---------- main loop ----------
   let lastWall = performance.now();
   let tipTimer = 0;
-  state.lastHmax = 0;
 
   function frame(wallNow) {
     const dt = Math.min((wallNow - lastWall) / 1000, 0.05);
@@ -564,26 +857,20 @@
     if (state.running && !frozen) state.simTime += dt * parseFloat(controls.timeScale.value);
 
     if (state.W === 0) resize();
-    const step = 2;                                 // px between samples
-    const n = Math.max(2, Math.ceil(state.W / step) + 1);
-    const etaA = new Array(n), etaB = new Array(n), etaSum = new Array(n);
-    const mPerPx = WORLD_W / state.W;
     const t = state.simTime;
-    for (let i = 0; i < n; i++) {
-      const x = i * step * mPerPx;
-      etaA[i] = trainEta(state.trainA, x, t);
-      etaB[i] = trainEta(state.trainB, x, t);
-      etaSum[i] = etaA[i] + etaB[i];
-    }
 
-    const { Hmax, iCrest } = scanWaves(etaSum);
-    state.lastHmax = Hmax;
-    const ratio = state.Hs > 0 ? Hmax / state.Hs : 0;
+    // detection: centre slice in 2D; three rows across the sea in 3D
+    const rows = state.mode === 'surf' ? [-WORLD_D / 3, 0, WORLD_D / 3] : [0];
+    const best = detect(t, rows, 360);
+    state.lastHmax = best.Hmax;
+    const ratio = state.Hs > 0 ? best.Hmax / state.Hs : 0;
     if (ratio >= ROGUE_RATIO && wallNow > state.cooldownUntil && state.running)
-      triggerRogue(iCrest, etaSum, step, ratio, wallNow);
+      triggerRogue(best, ratio, wallNow);
 
-    draw(etaA, etaB, etaSum, step, wallNow);
-    updateHud(Hmax);
+    if (state.mode === 'surf' && glOk) draw3d(t, wallNow);
+    else draw2d(t, wallNow);
+
+    updateHud(best.Hmax);
     if (wallNow - tipTimer > 500) { tipTimer = wallNow; updateTip(ratio); }
 
     requestAnimationFrame(frame);
@@ -607,9 +894,7 @@
     }
   });
   $('btn-reset').addEventListener('click', () => {
-    controls.aAmp.value = DEFAULTS.aAmp; controls.aFreq.value = DEFAULTS.aFreq; controls.aSpeed.value = DEFAULTS.aSpeed;
-    controls.bAmp.value = DEFAULTS.bAmp; controls.bFreq.value = DEFAULTS.bFreq; controls.bSpeed.value = DEFAULTS.bSpeed;
-    controls.timeScale.value = DEFAULTS.timeScale;
+    for (const k in DEFAULTS) controls[k].value = DEFAULTS[k];
     state.simTime = 0; state.rogueCount = 0; state.lastEvent = null;
     state.cooldownUntil = 0; state.freezeUntil = 0;
     $('v-count').textContent = '0';
@@ -626,9 +911,10 @@
   if (window.innerWidth < 980) setSidebar(false);   // start closed on small screens
 
   // expose a handle for automated testing
-  window.__sim = { state, scanWaves, trainEta, readParams };
+  window.__sim = { state, scanWaves, trainEta, readParams, detect, setMode, isGlOk: () => glOk };
 
   syncOutputs(); rebuild(); resize();
+  setMode('surf');                                   // 3D by default; falls back to 2D without WebGL
   requestAnimationFrame(frame);
 })();
 </script>
