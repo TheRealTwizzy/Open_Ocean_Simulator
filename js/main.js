@@ -176,7 +176,7 @@ function frame(wallNow) {
   const frozen = wallNow < state.freezeUntil;
   ui.setFrozen(frozen);
   if (state.running && !frozen) state.simTime += dt * state.timeScale;
-  const t = state.simTime;
+  let t = state.simTime;
 
   if (wallNow - lastDetect >= DETECT_MS) {
     lastDetect = wallNow;
@@ -186,12 +186,17 @@ function frame(wallNow) {
     const from = t - lastScanSim <= 1 ? lastScanSim : t;
     const { best, last } = detector.scanInterval(from, t);
     lastScanSim = t;
-    state.Hmax = last.Hmax;
-    state.ratio = sea.Hs > 0 ? last.Hmax / sea.Hs : 0;
+    let shown = last;
     const ratio = sea.Hs > 0 ? best.Hmax / sea.Hs : 0;
     // the sim-time gap keeps a static sea (time speed 0) from re-counting one wave every cooldown
     const advanced = !state.lastEvent || best.t - state.lastEvent.sim > 1;
-    if (ratio >= ROGUE_RATIO && wallNow > state.cooldownUntil && state.running && !frozen && advanced) triggerRogue(best, ratio, wallNow, best.t);
+    if (ratio >= ROGUE_RATIO && wallNow > state.cooldownUntil && state.running && !frozen && advanced) {
+      triggerRogue(best, ratio, wallNow, best.t);
+      // freeze on the sub-step that fired, so the sea and stats match the alert and beacon
+      if (state.autoFreeze) { t = lastScanSim = state.simTime = best.t; shown = best; }
+    }
+    state.Hmax = shown.Hmax;
+    state.ratio = sea.Hs > 0 ? shown.Hmax / sea.Hs : 0;
     ui.updateStats(state.Hmax, state.ratio);
   }
 

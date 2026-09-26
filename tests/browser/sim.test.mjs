@@ -253,6 +253,49 @@ test('the frame loop fires on the best sub-step since the last scan while the st
   }
 });
 
+test('auto-freeze holds the sea at the sub-step that fired, so the stats and the rendered sea match the alert', T, async () => {
+  // The span above with auto-freeze on: the alert reads 2.00 × H_s from the
+  // 860.405 s sub-step, so the sea freezes there rather than at 860.60 s (1.975).
+  const page = await newPage(browser);
+  const log = collectConsole(page);
+  try {
+    await open(page, server.url, '?q=low');
+    const t0 = 860.34, t1 = 860.60;
+    const r0 = await evalSim(page, (sim, t) => {
+      Object.assign(sim.state, { timeScale: 0, simTime: t });
+      return sim.detector.detect(t).Hmax / sim.sea.Hs;
+    }, t0);
+    await waitSim(page, (sim, x) => sim.state.ratio === x, r0);
+    assert.deepEqual(await evalSim(page, sim => [sim.state.autoFreeze, sim.state.rogueCount]), [true, 0]);
+
+    await evalSim(page, (sim, t) => { sim.state.simTime = t; }, t1);
+    // per frame from the one that fired (it renders too) until two frames later
+    const samples = (await sampleFrames(page, sim => {
+      const s = sim.state;
+      return {
+        ev: s.lastEvent, simTime: s.simTime, rendered: sim.ocean.simTime, ratio: s.ratio, Hs: sim.sea.Hs, Hmax: s.Hmax,
+        ratioText: document.getElementById('v-ratio').textContent, alertSub: document.getElementById('alert-sub').textContent,
+      };
+    }, null, { until: out => out.filter(x => x.ev).length >= 3, max: 40 })).filter(x => x.ev);
+
+    const ev = samples[0].ev;
+    assert.ok(ev.sim > t0 && ev.sim < t1 && ev.ratio >= 2, `fired on a sub-step (${ev.sim}, ratio ${ev.ratio})`);
+    assert.match(samples[0].alertSub, new RegExp(ev.ratio.toFixed(2).replace('.', '\\.') + ' × H_s'));
+    for (const [i, x] of samples.entries()) {
+      assert.equal(x.simTime, ev.sim, `frame ${i}: the sea is frozen at the event's sea time`);
+      assert.equal(x.rendered, ev.sim, `frame ${i}: the ocean renders the event's sea time`);
+      near(x.ratio, ev.ratio, 1e-12, `frame ${i}: the stats show the scan that fired`);
+      near(x.Hmax, ev.ratio * x.Hs, 1e-9, `frame ${i}: H_max`);
+      assert.equal(x.ratioText, ev.ratio.toFixed(2));
+    }
+    assert.equal(await evalSim(page, sim => sim.state.rogueCount), 1);
+
+    assert.deepEqual(onlyErrors(log), []);
+  } finally {
+    await page.close();
+  }
+});
+
 test('reset after an event hides the alert, the beacon and the count', T, async () => {
   const page = await newPage(browser);
   const log = collectConsole(page);
