@@ -12,11 +12,12 @@ folder over HTTP (`python3 -m http.server`) — ES modules do not load from
 
 ## What you can do
 
-- **Add, remove, mute and shape wave trains** (1–6). Each has amplitude, peak
+- **Add, remove, mute and shape wave trains** (up to 6). Each has amplitude, peak
   frequency, heading, bandwidth (±10–50 %), directional spread (0–40°) and, when
   dispersion is off, its own phase speed.
 - **Set the wind.** A JONSWAP wind sea (0–15 m/s, 60 km fetch, Gaussian
-  directional spread) runs underneath the trains and counts toward H<sub>s</sub>.
+  directional spread, waves longer than ~16 m) runs underneath the trains and
+  counts toward H<sub>s</sub>.
 - **Toggle deep-water dispersion** (ω² = g·k, on by default). Speed sliders then
   show the computed c = g/2πf and lock; groups focus and disperse for real.
 - **Interact with the water.** Drag to orbit, scroll or pinch to zoom, pick the
@@ -54,8 +55,10 @@ closes any panel.
 At the default settings (two trains at 0.15 Hz / 0.11 Hz crossing at 30°,
 bandwidth 20 %, spread 10°, 8 m/s wind) the two groups' refocus periods of
 100 s and 136 s beat against each other, so rogue events arrive in irregular
-bursts every minute or two at 2.5× time. Widen the bandwidth or the spread, or
-raise the wind, and they become rarer — like the real ocean.
+bursts every minute or two at 2.5× time (a lone group never crosses 2·H<sub>s</sub>
+in still water; with wind on, its random crests occasionally carry one over).
+Widen the bandwidth or the spread, or raise the wind, and events become rarer —
+like the real ocean.
 
 ## Layout
 
@@ -69,5 +72,5 @@ js/main.js          state, frame loop, detection, interaction, quality
 vendor/             three.module.min.js, OrbitControls.js, Sky.js (r170)
 ```
 
-Render quality is auto-picked (`?q=low|med|high` overrides it) and steps down
-once if the GPU cannot hold ~25 fps. Everything works offline once loaded.
+Render quality is auto-picked (`?q=low|med|high` overrides it) and steps down,
+up to twice, if the GPU cannot hold ~22 fps. Everything works offline once loaded.

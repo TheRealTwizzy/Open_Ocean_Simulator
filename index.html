@@ -80,7 +80,7 @@
       <div class="ctl"><label for="s-steep">Crest steepness (visual chop) <output id="s-steep-v"></output></label><input type="range" id="s-steep" min="0" max="0.9" step="0.05"></div>
       <div class="ctl"><label for="s-time">Time speed <output id="s-time-v"></output></label><input type="range" id="s-time" min="0" max="8" step="0.25"></div>
       <label class="toggle"><span>Deep-water dispersion (ω² = g·k)</span><input type="checkbox" id="s-disp"><i></i></label>
-      <label class="toggle"><span>Tint crests above H<sub>s</sub></span><input type="checkbox" id="s-tint"><i></i></label>
+      <label class="toggle"><span>Tint tall crests (warm from ⅔ H<sub>s</sub>)</span><input type="checkbox" id="s-tint"><i></i></label>
       <label class="toggle"><span>Auto-freeze on detection (1.6 s)</span><input type="checkbox" id="s-freeze"><i></i></label>
       <div class="ctl row-ctl"><label for="s-quality">Render quality</label>
         <select id="s-quality"><option value="auto">Auto</option><option value="low">Low</option><option value="med">Medium</option><option value="high">High</option></select>
@@ -113,7 +113,7 @@
 
   <section class="popover wide-pop" id="pop-physics" hidden aria-labelledby="pop-physics-title">
     <header><h2 id="pop-physics-title">How rogue waves form</h2></header>
-    <div class="body prose">
+    <div class="body prose" tabindex="0">
       <div class="tip" id="tip"></div>
 
       <h3>Superposition</h3>
@@ -126,7 +126,7 @@
       <p>In deep water each frequency travels at its own speed (<b>dispersion</b>, ω² = g·k, so c = g/2πf), so after focusing the components drift apart and the group flattens out — then, because the components are evenly spaced in frequency, they drift back into step every 1/Δf seconds. Wider bandwidth means a sharper, shorter-lived focus. Turn dispersion off and every component of a train shares one speed: the group becomes a rigid profile that never disperses.</p>
 
       <h3>The wind sea</h3>
-      <p>Underneath the trains is an ambient wind sea: a <em>JONSWAP</em> spectrum for the chosen wind speed (60 km fetch), realised as ~100 random-phase components with a Gaussian directional spread about the wind heading. It is part of the sea state, so its energy counts in H<sub>s</sub> — a stronger wind raises the bar a rogue has to clear while also adding random crests that sometimes help.</p>
+      <p>Underneath the trains is an ambient wind sea: a <em>JONSWAP</em> spectrum for the chosen wind speed (60 km fetch), realised as 48–144 random-phase components (by render quality) with a Gaussian directional spread about the wind heading. Only waves longer than ~16 m are kept, so the mesh can resolve them; below ~6 m/s most of the spectrum sits beyond that cutoff and the sea stays nearly calm. It is part of the sea state, so its energy counts in H<sub>s</sub> — a stronger wind raises the bar a rogue has to clear while also adding random crests that sometimes help.</p>
 
       <h3>Crossing seas and spread</h3>
       <p>Trains with different headings cross: their crest lines only fully reinforce where they intersect, and that intersection sweeps across the sea. Crossing wind sea and swell is a documented rogue mechanism and the leading explanation for the Draupner wave (25.6 m in a 12 m sea, 1 January 1995). <b>Spread</b> fans a train's components across a range of headings, making it short-crested: focus then happens at a point rather than along a whole line, so events are rarer but more realistic.</p>
@@ -136,13 +136,13 @@
       <div class="eq">H_s = 4·σ,&nbsp;&nbsp; σ² = Σ aᵢ² ⁄ 2</div>
       <p>A wave is <b>rogue</b> when its crest-to-trough height, measured between successive zero down-crossings, exceeds twice the significant height:</p>
       <div class="eq">H_max &gt; 2·H_s</div>
-      <p>The detector samples the central 600 × 320 m of the sea on an 8 m grid 30 times a second and scans every row and column for zero-crossing waves. The beacon marks the crest of the tallest one when it crosses the line. Crests climbing above the H<sub>s</sub> elevation glow warm — rogue territory.</p>
+      <p>The detector samples the central 600 × 320 m of the sea on an 8 m grid 30 times a second and scans every row and column for zero-crossing waves. The beacon marks the crest of the tallest one when it crosses the line. Crests climbing toward the H<sub>s</sub> elevation warm up, and glow above it — rogue territory.</p>
 
       <h3>What is visual only</h3>
-      <p>Crest <b>steepness</b> adds Gerstner-style horizontal displacement that sharpens crests and flattens troughs; foam appears where the surface folds. Splash ripples from clicking the water are decorative packets. None of these enter H<sub>s</sub> or the detector; the buoy, however, rides the full rendered surface.</p>
+      <p>Crest <b>steepness</b> adds Gerstner-style horizontal displacement that sharpens crests and flattens troughs; foam appears where the surface folds. Splash ripples from clicking the water are decorative packets. None of these enter H<sub>s</sub> or the detector; the buoy, however, rides the rendered surface, ripples included.</p>
 
       <h3>Why rogues are rare</h3>
-      <p>Two pure sine waves can never exceed 2·H<sub>s</sub>. It takes many components conspiring, and even then the tallest crest of a focused group alone reaches only ~1.6 H<sub>s</sub>. A rogue needs two groups to refocus at the same place at the same time — which, with periods of 100 s and 136 s at the default settings, happens in irregular bursts a minute or two apart.</p>
+      <p>Two pure sine waves can never exceed 2·H<sub>s</sub>. It takes many components conspiring: in still water even a fully focused group on its own peaks around 1.7–1.8 H<sub>s</sub> and never crosses the line. The wind sea's random crests riding on a focus can tip a lone group over it now and then, but the big, repeatable events need two groups to refocus at the same place at the same time — which, with periods of 100 s and 136 s at the default settings, happens in irregular bursts a minute or two apart.</p>
       <p><b>Recipe to hunt one:</b> keep the amplitudes comparable, keep bandwidths near 20%, spreads small, and let it run. Watch the H<sub>max</sub>/H<sub>s</sub> meter approach the red tick.</p>
     </div>
   </section>

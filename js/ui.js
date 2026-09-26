@@ -31,44 +31,57 @@ export function initUI({ state, sea, actions }) {
     pop.style.setProperty('--x', x + 'px');
   }
 
-  function closePop() {
+  function closePop(restoreFocus = true) {
     if (!openPop) return;
+    const btn = openBtn;
     openPop.hidden = true;
-    openBtn.setAttribute('aria-expanded', 'false');
+    btn.setAttribute('aria-expanded', 'false');
     openPop = openBtn = null;
     backdrop.hidden = true;
+    if (restoreFocus && (openPopHadFocus() || document.activeElement === document.body)) btn.focus({ preventScroll: true });
   }
+  const openPopHadFocus = () => document.activeElement && document.activeElement.closest('.popover');
 
   function openPopover(pop, btn) {
     const same = openPop === pop;
-    closePop();
-    if (same) return;
+    closePop(false);
+    if (same) { btn.focus({ preventScroll: true }); return; }
     positionPop(pop, btn);
     pop.hidden = false;
     btn.setAttribute('aria-expanded', 'true');
     openPop = pop; openBtn = btn;
     backdrop.hidden = !NARROW();
-    const first = pop.querySelector('input, button, select');
-    if (first && NARROW()) first.focus({ preventScroll: true });
+    pop.focus({ preventScroll: true });
   }
 
   dock.querySelectorAll('.dock-btn').forEach(btn => {
+    const id = btn.dataset.pop;
+    if (id) { btn.setAttribute('aria-controls', id); $(id).tabIndex = -1; }
     btn.addEventListener('click', () => {
       ping(btn);
-      const id = btn.dataset.pop;
       if (id) openPopover($(id), btn);
     });
   });
-  backdrop.addEventListener('click', closePop);
+  backdrop.addEventListener('click', () => closePop());
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { closePop(); return; }
+    if (e.key === 'Escape') {
+      if (openPop) closePop();
+      else if (!$('drawer').hidden) { setDrawer(false); $('btn-2d').focus({ preventScroll: true }); }
+      return;
+    }
     const tag = e.target.tagName;
-    if (e.code === 'Space' && tag !== 'INPUT' && tag !== 'BUTTON' && tag !== 'SELECT' && tag !== 'TEXTAREA') {
+    // inside a panel, Space belongs to its buttons and scrollable body; anywhere else it pauses
+    const inPanel = e.target.closest && e.target.closest('.popover, .drawer, .buoy-readout');
+    const panelControl = inPanel && (tag === 'BUTTON' || e.target.classList.contains('body'));
+    if (e.code === 'Space' && tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA' && !panelControl) {
       e.preventDefault();
       actions.togglePause();
     }
   });
-  window.addEventListener('resize', () => { if (openPop) positionPop(openPop, openBtn); resize2d(); });
+  window.addEventListener('resize', () => {
+    if (openPop) { positionPop(openPop, openBtn); backdrop.hidden = !NARROW(); }
+    resize2d();
+  });
 
   $('btn-pause').addEventListener('click', () => actions.togglePause());
   $('btn-2d').addEventListener('click', () => setDrawer($('drawer').hidden));
@@ -92,7 +105,7 @@ export function initUI({ state, sea, actions }) {
   const trainSliders = [
     ['amp', 'Amplitude (focused crest)', 0.1, 4, 0.05],
     ['freq', 'Peak frequency', 0.05, 0.3, 0.005],
-    ['speed', 'Phase speed', 2, 24, 0.25],
+    ['speed', 'Phase speed', 2, 32, 0.25],
     ['dir', 'Heading', -180, 180, 5],
     ['bw', 'Bandwidth', 0.1, 0.5, 0.05],
     ['spread', 'Directional spread', 0, 40, 1],
@@ -182,7 +195,12 @@ export function initUI({ state, sea, actions }) {
       if (key !== 'timeScale') actions.rebuild();
     });
   }
-  $('s-disp').addEventListener('change', e => { state.dispersion = e.target.checked; syncAllCards(); actions.rebuild(); });
+  $('s-disp').addEventListener('change', e => {
+    state.dispersion = e.target.checked;
+    if (!state.dispersion) state.trains.forEach(tr => { tr.speed = Math.min(Math.max(tr.speed, 2), 32); });
+    syncAllCards();
+    actions.rebuild();
+  });
   $('s-tint').addEventListener('change', e => { state.rogueTint = e.target.checked; actions.applyTint(); });
   $('s-freeze').addEventListener('change', e => { state.autoFreeze = e.target.checked; });
   $('s-quality').addEventListener('change', e => actions.setQuality(e.target.value));
@@ -222,6 +240,10 @@ export function initUI({ state, sea, actions }) {
   }
 
   let alertTimer = 0;
+  function hideAlert() {
+    clearTimeout(alertTimer);
+    $('alert').classList.remove('show');
+  }
   function showAlert(ev) {
     $('alert-sub').textContent = `H = ${(ev.ratio * sea.Hs).toFixed(1)} m · ${ev.ratio.toFixed(2)} × H_s · at (${Math.round(ev.xM)}, ${Math.round(ev.yM)}) m`;
     const overlay = $('alert');
@@ -255,12 +277,15 @@ export function initUI({ state, sea, actions }) {
   // ---------- buoy readout ----------
   const spark = $('buoy-spark'), sctx = spark.getContext('2d');
   const hist = [];
-  function updateBuoy(b, wallNow) {
+  function resetBuoyHistory() { hist.length = 0; }
+  // history is keyed by simulation time, so the window is 12 s of sea time
+  // and the trace holds still while the sea is paused or frozen
+  function updateBuoy(b, simNow) {
     const box = $('buoy-readout');
     if (!b) { box.hidden = true; hist.length = 0; return; }
     box.hidden = false;
-    hist.push([wallNow, b.eta]);
-    while (hist.length && wallNow - hist[0][0] > 12000) hist.shift();
+    if (!hist.length || simNow > hist[hist.length - 1][0]) hist.push([simNow, b.eta]);
+    while (hist.length > 1 && simNow - hist[0][0] > 12) hist.shift();
     let mx = -Infinity, mn = Infinity;
     for (const [, e] of hist) { if (e > mx) mx = e; if (e < mn) mn = e; }
     $('buoy-eta').textContent = (b.eta >= 0 ? '+' : '') + b.eta.toFixed(2);
@@ -279,8 +304,8 @@ export function initUI({ state, sea, actions }) {
     sctx.setLineDash([]);
     if (hist.length > 1) {
       sctx.strokeStyle = '#7dd3fc'; sctx.lineWidth = 1.6; sctx.beginPath();
-      hist.forEach(([w, e], i) => {
-        const x = W - (wallNow - w) / 12000 * W;
+      hist.forEach(([s, e], i) => {
+        const x = W - (simNow - s) / 12 * W;
         i ? sctx.lineTo(x, yOf(e)) : sctx.moveTo(x, yOf(e));
       });
       sctx.stroke();
@@ -307,6 +332,7 @@ export function initUI({ state, sea, actions }) {
   function draw2d(t, wallNow, Hmax) {
     if ($('drawer').hidden) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (canvas2d.width !== Math.round(canvas2d.clientWidth * dpr) || canvas2d.height !== Math.round(canvas2d.clientHeight * dpr)) resize2d();
     const W = canvas2d.width / dpr, H = canvas2d.height / dpr;
     if (W < 10 || H < 10) return;
     const n = Math.max(2, Math.ceil(W / 2) + 1);
@@ -395,7 +421,8 @@ export function initUI({ state, sea, actions }) {
     const on = state.trains.filter(t => t.on);
     let html;
     if (on.length === 0) html = '<b>No trains:</b> only the wind sea is running. Add a wave train to build interference.';
-    else if (on.length === 1) html = '<b>One train:</b> a single focused group tops out near 1.6 H<sub>s</sub>. Add a second train on a different heading to reach rogue territory.';
+    else if (on.length === 1 && state.wind < 0.5) html = '<b>One train, no wind:</b> a lone focused group peaks around 1.7–1.8 H<sub>s</sub> and never reaches 2. Add a second train on a different heading to reach rogue territory.';
+    else if (on.length === 1) html = '<b>One train:</b> the group alone stays under 2 H<sub>s</sub>, but the wind sea\'s random crests ride on top of its focus and can carry it over the line. Add a second train for the big, regular bursts.';
     else if (on.some(a => on.some(b => a !== b && Math.abs(a.freq - b.freq) < 0.012)))
       html = '<b>Beat pattern:</b> two trains share nearly the same frequency, so you get slow beats — broad zones of reinforcement and cancellation — rather than sharp focusing events.';
     else if (!state.dispersion) html = '<b>Dispersion off:</b> each train is a rigid group that never spreads out. Rogues now happen whenever two focused groups cross — more often, less realistically.';
@@ -418,8 +445,8 @@ export function initUI({ state, sea, actions }) {
   }
 
   return {
-    refresh, syncAllCards, syncSettings, syncModes, renderLegend, updateStats, showAlert, setPaused, setFrozen, updateBeacon,
-    updateBuoy, draw2d, updateTip, closePop, setDrawer,
+    refresh, syncAllCards, syncSettings, syncModes, renderLegend, updateStats, showAlert, hideAlert, setPaused, setFrozen, updateBeacon,
+    updateBuoy, resetBuoyHistory, draw2d, updateTip, closePop, setDrawer,
     isPopOpen: () => !!openPop,
     isDrawerOpen: () => !$('drawer').hidden,
     showNoGL: () => { $('nogl').hidden = false; setDrawer(true); },

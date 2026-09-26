@@ -12,7 +12,6 @@ const params = new URLSearchParams(location.search);
 
 const state = {
   trains: [],
-  nextSeed: 0,
   wind: 8, windDir: 20, steepness: 0.55, timeScale: 2.5, dispersion: true,
   quality: 'auto', qualityActual: 'med',
   rogueTint: true, autoFreeze: true,
@@ -24,8 +23,16 @@ const state = {
 
 function freshTrains() {
   state.trains = [defaultTrain(0), defaultTrain(1)];
-  state.nextSeed = 2;
   state.trains.forEach((tr, i) => { tr.color = TRAIN_COLORS[i]; });
+}
+
+// lowest preset/seed slot no current train uses, so a removed train's slot is
+// recycled instead of duplicating an existing preset
+function freeSeed() {
+  const used = new Set(state.trains.map(t => t.seed));
+  let i = 0;
+  while (used.has(i)) i++;
+  return i;
 }
 
 function autoQuality() {
@@ -43,6 +50,7 @@ const canvas = document.getElementById('gl');
 
 let ocean = null;
 const actions = {};
+let qualityDrops = 0, warmup = performance.now();
 const ui = initUI({ state, sea, actions });
 
 function compile() {
@@ -58,7 +66,7 @@ actions.rebuild = () => { compile(); ui.syncAllCards(); ui.renderLegend(); };
 
 actions.addTrain = () => {
   if (state.trains.length >= MAX_TRAINS) return;
-  const tr = defaultTrain(state.nextSeed++);
+  const tr = defaultTrain(freeSeed());
   if (!state.dispersion) tr.speed = phaseSpeed(tr.freq);
   state.trains.push(tr);
   ui.refresh();
@@ -81,7 +89,9 @@ actions.applyTint = () => { if (ocean) ocean.setRogueTint(state.rogueTint); };
 actions.setQuality = q => {
   state.quality = q;
   state.qualityActual = q === 'auto' ? autoQuality() : q;
-  if (ocean) ocean.setQuality(state.qualityActual);
+  if (ocean) { ocean.setQuality(state.qualityActual); ocean.frameTimes.length = 0; }
+  qualityDrops = 0;
+  warmup = performance.now();
   compile();
   ui.syncSettings();
 };
@@ -94,7 +104,7 @@ actions.setCamera = preset => {
   ui.syncModes();
 };
 
-actions.clearBuoy = () => { if (ocean) ocean.clearBuoy(); ui.updateBuoy(null, performance.now()); };
+actions.clearBuoy = () => { if (ocean) ocean.clearBuoy(); ui.updateBuoy(null, state.simTime); };
 
 actions.reset = () => {
   freshTrains();
@@ -103,15 +113,16 @@ actions.reset = () => {
     simTime: 0, freezeUntil: 0, cooldownUntil: 0, rogueCount: 0, lastEvent: null, Hmax: 0, ratio: 0,
   });
   if (ocean) { ocean.ripples.length = 0; ocean.clearBuoy(); ocean.setRogueTint(true); }
+  ui.hideAlert();
   ui.refresh();
   compile();
   ui.updateStats(0, 0);
 };
 
 // ---------- detection ----------
-function triggerRogue(best, ratio, wallNow) {
+function triggerRogue(best, ratio, wallNow, simNow) {
   state.rogueCount++;
-  state.lastEvent = { xM: best.xM, yM: best.yM, eta: best.eta, ratio, wall: wallNow };
+  state.lastEvent = { xM: best.xM, yM: best.yM, eta: best.eta, ratio, wall: wallNow, sim: simNow };
   state.cooldownUntil = wallNow + COOLDOWN_MS;
   if (state.autoFreeze) state.freezeUntil = wallNow + FREEZE_MS;
   ui.showAlert(state.lastEvent);
@@ -134,7 +145,7 @@ canvas.addEventListener('pointerup', e => {
   const p = ocean.pick(e.clientX, e.clientY);
   if (!p) return;
   if (state.clickMode === 'splash') ocean.addRipple(p.x, p.y, state.simTime);
-  else ocean.setBuoy(p.x, p.y);
+  else { ui.resetBuoyHistory(); ocean.setBuoy(p.x, p.y); }
 });
 canvas.addEventListener('pointercancel', () => { press = null; });
 
@@ -155,7 +166,7 @@ ui.updateStats(0, 0);
 window.addEventListener('resize', () => ocean && ocean.resize());
 
 let lastWall = performance.now();
-let lastDetect = 0, tipTimer = 0, qualityDrops = 0, warmup = performance.now();
+let lastDetect = 0, tipTimer = 0;
 
 function frame(wallNow) {
   const dt = Math.min((wallNow - lastWall) / 1000, 0.05);
@@ -172,14 +183,16 @@ function frame(wallNow) {
     const best = detector.detect(t);
     state.Hmax = best.Hmax;
     state.ratio = sea.Hs > 0 ? best.Hmax / sea.Hs : 0;
-    if (state.ratio >= ROGUE_RATIO && wallNow > state.cooldownUntil && state.running && !frozen) triggerRogue(best, state.ratio, wallNow);
+    // the sim-time gap keeps a static sea (time speed 0) from re-counting one wave every cooldown
+    const advanced = !state.lastEvent || t - state.lastEvent.sim > 1;
+    if (state.ratio >= ROGUE_RATIO && wallNow > state.cooldownUntil && state.running && !frozen && advanced) triggerRogue(best, state.ratio, wallNow, t);
     ui.updateStats(state.Hmax, state.ratio);
   }
 
   if (ocean) {
     ocean.frame(t, dt);
     ui.updateBeacon(wallNow, (x, h, y) => ocean.project(x, h, y));
-    ui.updateBuoy(ocean.buoyState(t), wallNow);
+    ui.updateBuoy(ocean.buoyState(t), t);
     // one-way adaptive quality: step down if the GPU cannot keep up
     if (state.quality === 'auto' && qualityDrops < 2 && wallNow - warmup > 4000) {
       const mean = ocean.meanFrameTime();
@@ -188,6 +201,7 @@ function frame(wallNow) {
         qualityDrops++;
         warmup = wallNow;
         ocean.setQuality(state.qualityActual);
+        ocean.frameTimes.length = 0;
         compile();
       }
     }

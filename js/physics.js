@@ -247,14 +247,18 @@ export class Sea {
 
   // Gerstner-displaced surface point and its normal for the material point
   // (x, y) — the same maths as the vertex shader, used for the buoy and beacon.
+  // lodSpacing (local mesh vertex spacing) and rim reproduce the shader's
+  // anti-aliasing and edge fades so the result sits on the rendered mesh.
   // out = { x, h, y, nx, ny, nz } with (x, h, y) in renderer axes (x, up, z).
-  displaced(x, y, t, out = {}) {
+  displaced(x, y, t, out = {}, lodSpacing = 0, rim = 1) {
     const Q = this.Q;
     let X = x, Y = y, h = 0, Sxx = 0, Sxy = 0, Syy = 0, Shx = 0, Shy = 0;
     for (let i = 0; i < this.n; i++) {
       const ph = this.kdx[i] * x + this.kdy[i] * y - this.w[i] * t + this.phi[i];
       const c = Math.cos(ph), s = Math.sin(ph);
-      const a = this.a[i], ak = a * this.k[i], dx = this.dx[i], dy = this.dy[i];
+      let a = this.a[i] * rim;
+      if (lodSpacing > 0) a *= 1 - smoothstep(2.0, 4.2, this.k[i] * lodSpacing);
+      const ak = a * this.k[i], dx = this.dx[i], dy = this.dy[i];
       h += a * c;
       X -= Q * a * dx * s;
       Y -= Q * a * dy * s;
@@ -301,17 +305,22 @@ export class Sea {
 export function scanWaves(eta, n = eta.length) {
   let Hmax = 0, iCrest = 0;
   let segMax = -Infinity, segMin = Infinity, segMaxI = 0;
+  const close = () => {
+    const h = segMax - segMin;
+    if (h > Hmax) { Hmax = h; iCrest = segMaxI; }
+  };
   for (let i = 0; i < n; i++) {
     const y = eta[i];
+    // the first sample below zero opens the next wave; it must not be
+    // charged to the wave that just ended
+    if (i > 0 && eta[i - 1] >= 0 && y < 0) {
+      close();
+      segMax = -Infinity; segMin = Infinity; segMaxI = i;
+    }
     if (y > segMax) { segMax = y; segMaxI = i; }
     if (y < segMin) segMin = y;
-    const down = i > 0 && eta[i - 1] >= 0 && y < 0;
-    if (down || i === n - 1) {
-      const h = segMax - segMin;
-      if (h > Hmax) { Hmax = h; iCrest = segMaxI; }
-      segMax = y; segMin = y; segMaxI = i;
-    }
   }
+  if (n > 0) close();
   return { Hmax, iCrest };
 }
 

@@ -12,6 +12,9 @@ const GRID_LINEAR = 0.28;            // share of linear spacing in the stretch: 
 const FAR_PLANE = 40000;
 const CAMERA_CLEARANCE = 2.5;        // metres the camera must keep above the surface
 
+const smoothstep = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
+const REDUCED_MOTION = () => window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 const PRESETS = {
   orbit:   { position: [285, 170, 450], target: [0, 0, 0] },
   surface: { position: [-46, 7, 160], target: [0, 1.5, 0] },
@@ -101,6 +104,7 @@ uniform float uRogueTint;
 uniform float uTime;
 uniform float uFogNear;
 uniform float uFogFar;
+uniform float uRim;
 varying vec3 vWorld;
 varying vec3 vNormal;
 varying float vH;
@@ -116,6 +120,10 @@ float vnoise(vec2 p) {
 float fbm(vec2 p) { return 0.5 * vnoise(p) + 0.25 * vnoise(p * 2.1 + 3.7) + 0.125 * vnoise(p * 4.3 + 1.3); }
 
 void main() {
+#ifdef FLAT
+  // the far plane only fills beyond the displaced mesh; inside it would poke through troughs
+  if (max(abs(vWorld.x), abs(vWorld.z)) < uRim * 0.995) discard;
+#endif
   vec3 N = normalize(vNormal);
   vec3 toCam = cameraPosition - vWorld;
   float dist = length(toCam);
@@ -151,7 +159,7 @@ void main() {
   float foam = clamp(foamDrive * smoothstep(0.32, 0.72, n1) * 1.5, 0.0, 1.0);
   col = mix(col, vec3(0.86, 0.92, 0.97) * (0.55 + 0.55 * NdL), foam);
 
-  float rz = smoothstep(0.85, 1.15, hN) * uRogueTint;
+  float rz = smoothstep(0.65, 1.0, hN) * uRogueTint;
   col = mix(col, col * vec3(2.4, 0.95, 0.55) + vec3(0.32, 0.09, 0.02), rz * 0.65);
 
   vec3 hz = normalize(vec3(-V.x, 0.0, -V.z) + vec3(0.0, 0.03, 0.0));
@@ -252,6 +260,10 @@ export class Ocean {
     this.skyCamera = new THREE.CubeCamera(1, 100000, this.skyTarget);
     this.bakeScene = new THREE.Scene();
     this.rebakeSky();
+    // three rebuilds programs and textures after a context restore, but the
+    // baked cube map is a render target whose contents are simply gone
+    this.needsRebake = false;
+    canvas.addEventListener('webglcontextrestored', () => { this.needsRebake = true; });
 
     const sun = new THREE.DirectionalLight(0xfff1dc, 2.2);
     sun.position.copy(this.sunDir).multiplyScalar(1000);
@@ -290,7 +302,7 @@ export class Ocean {
 
     const farMat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: WAVE_VERT, fragmentShader: WAVE_FRAG, defines: { FLAT: 1 } });
     const far = new THREE.Mesh(gridGeometry(FAR_PLANE, 2), farMat);
-    far.position.y = -0.4;
+    far.position.y = -0.15;
     far.frustumCulled = false;
     this.scene.add(far);
     this.farMesh = far;
@@ -338,9 +350,23 @@ export class Ocean {
       this.mesh.geometry.dispose();
       this.mesh.geometry = gridGeometry(PLANE, preset.segments, true);
     }
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, preset.pixelRatio));
     this.resize();
   }
+
+  // Local vertex spacing of the stretched grid at sea-plane (x, y): invert
+  // x = R·(a·u + (1−a)·u³) for u, then differentiate.
+  gridSpacingAt(x, y) {
+    const segments = this.mesh.geometry.parameters.segments, R = PLANE / 2, a = GRID_LINEAR;
+    const sp = v => {
+      const target = Math.min(Math.abs(v), R) / R;
+      let u = target;
+      for (let i = 0; i < 6; i++) u -= (a * u + (1 - a) * u * u * u - target) / (a + 3 * (1 - a) * u * u);
+      return (2 / segments) * R * (a + 3 * (1 - a) * u * u);
+    };
+    return Math.max(sp(x), sp(y));
+  }
+
+  rimAt(x, y) { return 1 - smoothstep(0.82 * PLANE / 2, PLANE / 2, Math.max(Math.abs(x), Math.abs(y))); }
 
   // After sea.compile(): refresh everything that only changes with the spectrum.
   syncSea() {
@@ -348,7 +374,8 @@ export class Ocean {
     sea.packStatic(this.texData);
     this.uniforms.uCount.value = sea.n;
     this.uniforms.uHs.value = sea.Hs;
-    this.uniforms.uFoamJ.value.set(0.72 * sea.steepness, 1.0 * sea.steepness);
+    // smoothstep is undefined when its edges coincide, so keep them apart at steepness 0
+    this.uniforms.uFoamJ.value.set(Math.max(0.72 * sea.steepness, 0.02), Math.max(sea.steepness, 0.05));
     this.compTex.needsUpdate = true;
   }
 
@@ -356,6 +383,7 @@ export class Ocean {
 
   resize() {
     const w = this.canvas.clientWidth || window.innerWidth, h = this.canvas.clientHeight || window.innerHeight;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, QUALITY[this.quality].pixelRatio));
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
@@ -364,7 +392,7 @@ export class Ocean {
   setPreset(name, animate = true) {
     const p = PRESETS[name] || PRESETS.orbit;
     this.preset = name;
-    if (!animate) {
+    if (!animate || REDUCED_MOTION()) {
       this.camera.position.set(...p.position);
       this.controls.target.set(...p.target);
       this.controls.update();
@@ -417,16 +445,19 @@ export class Ocean {
     this.buoyMesh.visible = false;
   }
 
-  // Surface point (renderer axes) and elevation at the buoy, including ripples.
+  // Surface point (renderer axes) and elevation at the buoy, on the rendered
+  // mesh (same spacing/rim fades as the shader) including ripples.
   buoyState(t) {
     if (!this.buoy) return null;
-    const p = this.sea.displaced(this.buoy.x, this.buoy.y, t, this._pt);
-    const rip = rippleEta(this.ripples, this.buoy.x, this.buoy.y, t);
-    return { x: p.x, h: p.h + rip, z: p.y, eta: this.sea.eta(this.buoy.x, this.buoy.y, t) + rip, nx: p.nx, ny: p.ny, nz: p.nz };
+    const { x, y } = this.buoy;
+    const p = this.sea.displaced(x, y, t, this._pt, this.gridSpacingAt(x, y), this.rimAt(x, y));
+    const rip = rippleEta(this.ripples, x, y, t);
+    return { x: p.x, h: p.h + rip, z: p.y, eta: p.h + rip, nx: p.nx, ny: p.ny, nz: p.nz };
   }
 
   frame(simTime, wallDt) {
     this.simTime = simTime;
+    if (this.needsRebake) { this.needsRebake = false; this.rebakeSky(); }
     const sea = this.sea, u = this.uniforms;
     sea.packPhases(this.texData, simTime);
     this.compTex.needsUpdate = true;
@@ -447,7 +478,10 @@ export class Ocean {
       if (tr.t >= 1) { this.transition = null; this.controls.enabled = true; }
     }
     this.controls.update();
+    // lift the camera clear of crests for this render only; OrbitControls
+    // re-derives its orbit from the position, so a lasting write would ratchet
     const cam = this.camera.position;
+    const camY = cam.y;
     const minY = sea.eta(cam.x, cam.z, simTime) + rippleEta(this.ripples, cam.x, cam.z, simTime) + CAMERA_CLEARANCE;
     if (cam.y < minY) cam.y = minY;
 
@@ -462,6 +496,7 @@ export class Ocean {
     }
 
     this.renderer.render(this.scene, this.camera);
+    cam.y = camY;
     this.frameTimes.push(wallDt);
     if (this.frameTimes.length > 90) this.frameTimes.shift();
   }
