@@ -79,6 +79,11 @@ package.json        test scripts and the pinned Playwright version
 Render quality is auto-picked (`?q=low|med|high` overrides it) and steps down,
 up to twice, if the GPU cannot hold ~22 fps. Everything works offline once loaded.
 
+`?fps` adds a readout of the median frame time and, where the browser exposes
+`EXT_disjoint_timer_query_webgl2`, the GPU time per render. `?noskip` turns off
+the shader's zero-weight skips (same image, different work), so opening
+`?q=low&fps` and `?q=low&fps&noskip` on one device measures what they save.
+
 ## Tests
 
 ```

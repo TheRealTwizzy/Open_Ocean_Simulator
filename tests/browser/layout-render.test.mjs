@@ -436,7 +436,7 @@ test('no WebGL on short landscapes: the fallback panel leaves the brand, stats, 
   try {
     await open(page, server.url, '?q=low', { nogl: true });
     const bad = [];
-    for (const [w, h] of [[844, 390], [740, 360], [667, 375], [812, 375], [640, 360], [568, 320], [480, 320]]) {
+    for (const [w, h] of [[844, 390], [740, 360], [667, 375], [812, 375], [640, 360], [630, 360], [616, 360], [610, 360], [568, 320], [480, 320], [440, 320], [414, 320], [375, 320], [360, 480], [320, 480]]) {
       if (w !== 844) await setViewport(page, w, h);
       await settle(page);
       const { blocks, W, H } = await hudBlocks(page);

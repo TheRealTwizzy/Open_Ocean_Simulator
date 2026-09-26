@@ -44,6 +44,13 @@ async function settle(page) {
 // the computed colours of the two tokens. html and body are skipped: they
 // paint under the full-screen canvas.
 function measureText() {
+  // only settled states count: a finite animation, or a transition of anything the
+  // composite reads (the hint's timed fade-out), mixes in a passing opacity; the
+  // caller retries until the page is still
+  const moving = document.getAnimations().some(a => a.playState === 'running' && (a.transitionProperty
+    ? /^(opacity|visibility|color|background)/.test(a.transitionProperty)
+    : a.effect.getComputedTiming().iterations !== Infinity));
+  if (moving) return null;
   const parse = s => {
     const m = /rgba?\(([^)]+)\)/.exec(s);
     if (!m) return null;
@@ -148,7 +155,12 @@ function measureText() {
 // printed by this test (`printed`), and returns the --faint/--muted rows under
 // 4.5:1.
 async function audit(t, page, state, printed = new Set()) {
-  const { tokens, rows } = await page.evaluate(measureText);
+  // settle() cannot rule out a timed fade starting before the measurement, so the
+  // stillness check runs in the same task as the measurement
+  let snap = null;
+  for (let i = 0; i < 200 && !snap; i++) if (!(snap = await page.evaluate(measureText))) await page.waitForTimeout(50);
+  assert.ok(snap, `${state}: the page never stopped animating`);
+  const { tokens, rows } = snap;
   rows.sort((a, b) => a.ratio - b.ratio);
   const lines = [];
   for (const r of rows) {
