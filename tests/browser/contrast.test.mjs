@@ -6,7 +6,9 @@
 // sweeping behind popover and drawer header text) and their inset glows
 // (zero-offset inset box-shadows, at half their alpha: their value along the
 // padding edge, which text never reaches). A gradient counts as the stop that
-// leaves the lowest contrast; backdrop blur is ignored. Text in --faint or
+// leaves the lowest contrast; backdrop blur is ignored. An ancestor with
+// opacity < 1 fades its whole group (text and fills inside it) toward what lies
+// under it, as the browser composites it. Text in --faint or
 // --muted must reach WCAG AA 4.5:1; every other text colour is reported, not
 // asserted. Run: node --test tests/browser/contrast.test.mjs
 
@@ -116,14 +118,24 @@ function measureText() {
     if (r.width === 0 || r.height === 0 || cs.visibility !== 'visible' || opacity(el) < 0.05) continue;
     const color = parse(cs.color);
     if (!color) continue;
-    const layers = [];
-    for (let e = el; e && e !== document.body; e = e.parentElement) layers.push(...layersOf(e, r));
+    const chain = [];
+    for (let e = el; e && e !== document.body; e = e.parentElement) chain.push(e);
     const contrast = b => ratio(over(color, b), b);
-    let back = [255, 255, 255];
-    for (let i = layers.length - 1; i >= 0; i--) {
-      back = layers[i].map(c => over(c, back)).reduce((a, b) => (contrast(b) < contrast(a) ? b : a));
-    }
-    const fg = over(color, back);
+    const mix = (x, b, o) => [0, 1, 2].map(i => o * x[i] + (1 - o) * b[i]);
+    // Paints chain[k] (its layers, bottom up) and everything inside it, the
+    // text last, over `under`; then applies chain[k]'s group opacity: the
+    // group's result, backdrop and text alike, is mixed with `under`.
+    const paint = (k, under) => {
+      const layers = layersOf(chain[k], r);
+      let back = under;
+      for (let i = layers.length - 1; i >= 0; i--) {
+        back = layers[i].map(c => over(c, back)).reduce((a, b) => (contrast(b) < contrast(a) ? b : a));
+      }
+      const res = k === 0 ? { back, fg: over(color, back) } : paint(k - 1, back);
+      const o = parseFloat(getComputedStyle(chain[k]).opacity);
+      return o < 1 ? { back: mix(res.back, under, o), fg: mix(res.fg, under, o) } : res;
+    };
+    const { back, fg } = paint(chain.length - 1, [255, 255, 255]);
     out.push({
       el: label(el), text: text.slice(0, 24), token: tokenOf[cs.color] || null,
       color: cs.color, back: back.map(Math.round), ratio: ratio(fg, back),
@@ -224,6 +236,27 @@ test('375x812: the wave-train popover as a bottom sheet', T, async t => {
     const sheet = await page.evaluate(() => getComputedStyle(document.getElementById('pop-trains')).borderTopLeftRadius);
     assert.equal(sheet, '18px', 'the popover is a bottom sheet');
     assert.deepEqual(await audit(t, page, 'pop-trains sheet'), []);
+    assert.deepEqual(onlyErrors(log), []);
+  } finally {
+    await page.close();
+  }
+});
+
+// The toggle and sliders of a switched-off card still work, so its text is not
+// exempt as an inactive component.
+test('800x600: a switched-off train card', T, async t => {
+  const page = await newPage(browser, { width: 800, height: 600 });
+  const log = collectConsole(page);
+  try {
+    await open(page, server.url, '?q=low');
+    await evalSim(page, sim => { sim.state.running = false; });
+    await clickDock(page, '[data-pop="pop-trains"]');
+    await page.locator('#pop-trains').waitFor({ state: 'visible' });
+    await page.click('#train-list .card:first-child .card-head .toggle');
+    await waitSim(page, sim => !sim.state.trains[0].on && document.querySelector('#train-list .card').classList.contains('off'));
+    await page.mouse.move(796, 4);
+    await settle(page);
+    assert.deepEqual(await audit(t, page, 'train 1 off'), []);
     assert.deepEqual(onlyErrors(log), []);
   } finally {
     await page.close();
