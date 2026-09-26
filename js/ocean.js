@@ -363,16 +363,16 @@ export class Ocean {
     return ext ? { ext, pending: [] } : null;
   }
 
-  // Results arrive a few frames late; a disjoint event (e.g. a GPU power-state
-  // change) voids every query in flight.
+  // Results arrive a few frames late (many on slow GPUs) and are kept until they
+  // do; a disjoint event (e.g. a GPU power-state change) voids every query in flight.
   drainGpuTimer() {
     const gl = this.renderer.getContext(), T = this.gpuTimer;
     const disjoint = gl.getParameter(T.ext.GPU_DISJOINT_EXT);
     while (T.pending.length) {
       const q = T.pending[0];
       const ready = gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE);
-      if (!ready && !disjoint && T.pending.length <= 8) break;
-      if (ready && !disjoint) this.gpuTimes.push(gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6);
+      if (!ready && !disjoint) break;
+      if (!disjoint) this.gpuTimes.push(gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6);
       gl.deleteQuery(q);
       T.pending.shift();
     }
@@ -561,11 +561,13 @@ export class Ocean {
       m.scale.setScalar(s);
     }
 
+    // at most 8 timer queries in flight: past that, frames go untimed until results return
     const T = this.gpuTimer, gl = T && this.renderer.getContext();
-    const query = T && gl.createQuery();
+    const query = T && T.pending.length < 8 && gl.createQuery();
     if (query) gl.beginQuery(T.ext.TIME_ELAPSED_EXT, query);
     this.renderer.render(this.scene, this.camera);
-    if (query) { gl.endQuery(T.ext.TIME_ELAPSED_EXT); T.pending.push(query); this.drainGpuTimer(); }
+    if (query) { gl.endQuery(T.ext.TIME_ELAPSED_EXT); T.pending.push(query); }
+    if (T) this.drainGpuTimer();
     cam.y = camY;
     this.frameTimes.push(wallDt);
     if (this.frameTimes.length > 90) this.frameTimes.shift();

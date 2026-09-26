@@ -1,7 +1,8 @@
 // The measuring aids for the shader's zero-weight skips: ?noskip must render
 // exactly the image the default shader renders (the skips only drop work whose
 // result is multiplied by zero), and ?fps must show the frame time, the
-// quality and whether the skips are on.
+// quality and whether the skips are on, keeping GPU timer queries until they
+// report however many frames that takes.
 // Run: npm run test:browser
 //
 // The pixel check pins the sea and camera in two pages, one per shader, renders
@@ -110,6 +111,58 @@ test('?fps shows the frame time, the quality and whether the skips are on; hidde
     await waitFrames(page, 3);
     assert.equal(await page.evaluate(() => document.getElementById('perf').hidden), true);
     assert.equal(await evalSim(page, sim => sim.ocean.gpuTimer), null);
+  } finally {
+    await page.close();
+  }
+});
+
+// A stand-in EXT_disjoint_timer_query_webgl2 (SwiftShader exposes none) whose
+// results take `latency` frames to arrive and always read 3.25 ms. Counts
+// queries deleted before their result was available.
+function fakeGpuTimer(latency) {
+  const TIME_ELAPSED = 0x88BF, DISJOINT = 0x8FBB, AVAILABLE = 0x8867, RESULT = 0x8866;
+  let frame = 0, active = null;
+  const tick = () => { frame++; requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+  window.__fake = { droppedEarly: 0, maxPending: 0, pending: 0 };
+  const P = WebGL2RenderingContext.prototype, orig = { ...Object.fromEntries(
+    ['getExtension', 'getParameter', 'createQuery', 'beginQuery', 'endQuery', 'getQueryParameter', 'deleteQuery'].map(k => [k, P[k]])) };
+  const fakes = new WeakSet();
+  P.getExtension = function (name) {
+    return name === 'EXT_disjoint_timer_query_webgl2' ? { TIME_ELAPSED_EXT: TIME_ELAPSED, GPU_DISJOINT_EXT: DISJOINT } : orig.getExtension.call(this, name);
+  };
+  P.getParameter = function (p) { return p === DISJOINT ? false : orig.getParameter.call(this, p); };
+  P.createQuery = function () { const q = { end: Infinity }; fakes.add(q); return q; };
+  P.beginQuery = function (target, q) { if (target !== TIME_ELAPSED) return orig.beginQuery.call(this, target, q); active = q; };
+  P.endQuery = function (target) {
+    if (target !== TIME_ELAPSED) return orig.endQuery.call(this, target);
+    active.end = frame;
+    const f = window.__fake;
+    f.maxPending = Math.max(f.maxPending, ++f.pending);
+  };
+  P.getQueryParameter = function (q, p) {
+    if (!fakes.has(q)) return orig.getQueryParameter.call(this, q, p);
+    return p === AVAILABLE ? frame >= q.end + latency : p === RESULT ? 3.25e6 : null;
+  };
+  P.deleteQuery = function (q) {
+    if (!fakes.has(q)) return orig.deleteQuery.call(this, q);
+    if (frame < q.end + latency) window.__fake.droppedEarly++;
+    window.__fake.pending--;
+  };
+}
+
+test('?fps keeps GPU timer queries until they report, even when results lag 12 frames', T, async () => {
+  const page = await newPage(browser, { width: 640, height: 480 });
+  const log = collectConsole(page);
+  try {
+    await page.addInitScript(fakeGpuTimer, 12);
+    await open(page, server.url, '?q=low&fps');
+    assert.ok(await evalSim(page, sim => !!sim.ocean.gpuTimer), 'the stand-in timer is picked up');
+    await page.waitForFunction(() => /GPU 3\.25 ms$/.test(document.getElementById('perf').textContent), null, { timeout: 90_000 });
+    const fake = await page.evaluate(() => window.__fake);
+    assert.equal(fake.droppedEarly, 0, 'no query is deleted before its result arrives');
+    assert.ok(fake.maxPending <= 8, `at most 8 queries in flight (${fake.maxPending})`);
+    assert.deepEqual(onlyErrors(log), []);
   } finally {
     await page.close();
   }
