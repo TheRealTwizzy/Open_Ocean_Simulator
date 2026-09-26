@@ -180,8 +180,11 @@ function frame(wallNow) {
 
   if (wallNow - lastDetect >= DETECT_MS) {
     lastDetect = wallNow;
-    // the stats show the sea at t; the trigger sees every sub-step since the last scan
-    const { best, last } = detector.scanInterval(lastScanSim, t);
+    // the stats show the sea at t; the trigger sees every sub-step since the last
+    // scan. Frames advance at most ~0.7 s of sea time between scans (8x), so a
+    // longer gap is a jump written to state.simTime and only t is scanned.
+    const from = t - lastScanSim <= 1 ? lastScanSim : t;
+    const { best, last } = detector.scanInterval(from, t);
     lastScanSim = t;
     state.Hmax = last.Hmax;
     state.ratio = sea.Hs > 0 ? last.Hmax / sea.Hs : 0;

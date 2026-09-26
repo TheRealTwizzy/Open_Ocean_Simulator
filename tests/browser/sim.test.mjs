@@ -175,6 +175,40 @@ test('at time speed 0 a parked rogue is counted once, even after the 6 s cooldow
   }
 });
 
+test('a jump written to the sea time is scanned at the new time alone: the parked rogue counts once', T, async () => {
+  // Sub-stepping 0.3 -> 860.405 s would scan 143 s apart, fire on a wave near
+  // 573.7 s that was never on screen, then count the parked one after the cooldown.
+  const page = await newPage(browser);
+  const log = collectConsole(page);
+  try {
+    await open(page, server.url, '?q=low');
+    const r0 = await evalSim(page, sim => {
+      sim.state.timeScale = 0;
+      sim.state.simTime = 0.3;
+      return sim.detector.detect(0.3).Hmax / sim.sea.Hs;
+    });
+    await waitSim(page, (sim, r) => sim.state.ratio === r, r0);
+    const target = 860.405;
+    const ratio = await evalSim(page, (sim, t) => {
+      sim.state.simTime = t;
+      return sim.detector.detect(t).Hmax / sim.sea.Hs;
+    }, target);
+    assert.ok(ratio >= 2, `a rogue is parked at ${target} s (ratio ${ratio})`);
+
+    const ev = await waitSim(page, sim => sim.state.lastEvent);
+    assert.equal(ev.sim, target, 'the event is stamped with the sea time jumped to');
+    near(ev.ratio, ratio, 1e-12, 'event ratio');
+
+    await waitSim(page, sim => performance.now() > sim.state.cooldownUntil + 100, null, { timeout: 90_000 });
+    const samples = await sampleFrames(page, sim => ({ count: sim.state.rogueCount, sim: sim.state.lastEvent.sim }), null, { frames: 4 });
+    for (const s of samples) assert.deepEqual(s, { count: 1, sim: target }, 'still one event after the cooldown');
+
+    assert.deepEqual(onlyErrors(log), []);
+  } finally {
+    await page.close();
+  }
+});
+
 test('reset after an event hides the alert, the beacon and the count', T, async () => {
   const page = await newPage(browser);
   const log = collectConsole(page);
