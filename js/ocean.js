@@ -47,6 +47,7 @@ void main() {
     vec4 c1 = texelFetch(uComps, ivec2(i, 1), 0);   // phase(t), a·k, Q·a, Q·a·k
     // components too short for the local vertex spacing alias; fade them out
     float lod = rim * (1.0 - smoothstep(2.0, 4.2, c0.y * spacing));
+    if (lod <= 0.0) continue;         // contributes exactly zero: skip its sin/cos
     c0.x *= lod; c1.yzw *= lod;
     float ph = c0.y * (c0.z * x + c0.w * y) + c1.x;
     float cs = cos(ph), sn = sin(ph);
@@ -128,11 +129,27 @@ void main() {
   vec3 toCam = cameraPosition - vWorld;
   float dist = length(toCam);
   vec3 V = toCam / max(dist, 1e-3);
-  // fine ripple detail the mesh cannot carry, fading with distance
-  float detail = (1.0 - smoothstep(40.0, 420.0, dist)) * 0.22;
-  float fine = (1.0 - smoothstep(10.0, 140.0, dist)) * 0.14;
-  vec2 dn = vec2(fbm(vWorld.xz * 0.14 + uTime * 0.05) - 0.5, fbm(vWorld.zx * 0.14 - uTime * 0.04) - 0.5) * detail
-          + vec2(fbm(vWorld.xz * 0.6 + uTime * 0.13) - 0.5, fbm(vWorld.zx * 0.6 - uTime * 0.1) - 0.5) * fine;
+  // fine ripple detail the mesh cannot carry, fading with distance. The fbm
+  // noise dominates this shader's cost, so each noise term below is skipped
+  // where its weight is exactly zero (same image, less work far out). The far
+  // plane keeps these two unbranched: lanes killed by its discard still feed
+  // textureCube's derivatives, and SwiftShader leaves a killed lane's branch
+  // result stale, which flickers pixels along the rim.
+  vec2 dn = vec2(0.0);
+#ifndef FLAT
+  if (dist < 420.0)
+#endif
+  {
+    float detail = (1.0 - smoothstep(40.0, 420.0, dist)) * 0.22;
+    dn = vec2(fbm(vWorld.xz * 0.14 + uTime * 0.05) - 0.5, fbm(vWorld.zx * 0.14 - uTime * 0.04) - 0.5) * detail;
+  }
+#ifndef FLAT
+  if (dist < 140.0)
+#endif
+  {
+    float fine = (1.0 - smoothstep(10.0, 140.0, dist)) * 0.14;
+    dn += vec2(fbm(vWorld.xz * 0.6 + uTime * 0.13) - 0.5, fbm(vWorld.zx * 0.6 - uTime * 0.1) - 0.5) * fine;
+  }
   N = normalize(N + vec3(dn.x, 0.0, dn.y));
 
   float NdV = clamp(dot(N, V), 0.0, 1.0);
@@ -143,7 +160,7 @@ void main() {
 
   float RdL = max(dot(R, uSunDir), 0.0);
   float glint = pow(RdL, 1400.0) * 14.0 + pow(RdL, 120.0) * 0.5;
-  float sparkle = mix(1.0, 0.4 + 1.2 * fbm(vWorld.xz * 0.3 + uTime * 0.09), 1.0 - smoothstep(150.0, 900.0, dist));
+  float sparkle = dist < 900.0 ? mix(1.0, 0.4 + 1.2 * fbm(vWorld.xz * 0.3 + uTime * 0.09), 1.0 - smoothstep(150.0, 900.0, dist)) : 1.0;
   glint *= sparkle;
 
   float hN = vH / max(uHs, 0.2);
@@ -155,7 +172,8 @@ void main() {
 
   float fold = clamp(1.0 - vJ, 0.0, 1.0);
   float foamDrive = smoothstep(uFoamJ.x, uFoamJ.y, fold) + smoothstep(1.0, 1.5, hN) * 0.7 + vRip * 0.8;
-  float n1 = fbm(vWorld.xz * 0.11 + vec2(uTime * 0.025, 0.0));
+  // foamDrive is 0 on the whole flat far plane (vJ = 1, vH = 0, vRip = 0)
+  float n1 = foamDrive > 0.0 ? fbm(vWorld.xz * 0.11 + vec2(uTime * 0.025, 0.0)) : 0.0;
   float foam = clamp(foamDrive * smoothstep(0.32, 0.72, n1) * 1.5, 0.0, 1.0);
   col = mix(col, vec3(0.86, 0.92, 0.97) * (0.55 + 0.55 * NdL), foam);
 
