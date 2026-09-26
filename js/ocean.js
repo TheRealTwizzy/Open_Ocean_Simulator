@@ -129,12 +129,10 @@ void main() {
   vec3 toCam = cameraPosition - vWorld;
   float dist = length(toCam);
   vec3 V = toCam / max(dist, 1e-3);
-  // fine ripple detail the mesh cannot carry, fading with distance. The fbm
-  // noise dominates this shader's cost, so each noise term below is skipped
-  // where its weight is exactly zero (same image, less work far out). The far
-  // plane keeps these two unbranched: lanes killed by its discard still feed
-  // textureCube's derivatives, and SwiftShader leaves a killed lane's branch
-  // result stale, which flickers pixels along the rim.
+  // fine ripple detail the mesh cannot carry, fading with distance. Zero-weight noise is
+  // branched around, which only saves work on GPUs that skip a branch all lanes agree on
+  // (SwiftShader masks both sides: ~5-15% slower). FLAT keeps these two unbranched, as its
+  // discarded lanes still feed textureCube's derivatives.
   vec2 dn = vec2(0.0);
 #ifndef FLAT
   if (dist < 420.0)
