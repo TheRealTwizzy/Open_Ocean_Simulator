@@ -209,6 +209,50 @@ test('a jump written to the sea time is scanned at the new time alone: the parke
   }
 });
 
+test('the frame loop fires on the best sub-step since the last scan while the stats show the sea at t', T, async () => {
+  // One 8x frame span written by hand at time speed 0: scans at 860.34 s
+  // (ratio 1.997) and 860.60 s (1.975) both miss the ~0.1 s window that peaks
+  // at 2.002 between them; sub-steps 0.065 s apart catch it at 860.405 s.
+  const page = await newPage(browser);
+  const log = collectConsole(page);
+  try {
+    await open(page, server.url, '?q=low');
+    const t0 = 860.34, t1 = 860.60;
+    const r = await evalSim(page, (sim, [a, b]) => {
+      Object.assign(sim.state, { timeScale: 0, autoFreeze: false, simTime: a });
+      const ratio = t => sim.detector.detect(t).Hmax / sim.sea.Hs;
+      return { a: ratio(a), b: ratio(b) };
+    }, [t0, t1]);
+    assert.ok(r.a < 2 && r.b < 2, `both ends miss (${r.a}, ${r.b})`);
+    await waitSim(page, (sim, x) => sim.state.ratio === x, r.a);
+    assert.equal(await evalSim(page, sim => sim.state.rogueCount), 0);
+
+    await evalSim(page, (sim, t) => { sim.state.simTime = t; }, t1);
+    // the event, if any, fires in the same scan that shows t1 in the stats
+    await waitSim(page, (sim, x) => sim.state.ratio === x, r.b);
+    const s = await evalSim(page, sim => {
+      const ev = sim.state.lastEvent;
+      return {
+        count: sim.state.rogueCount, ev, simTime: sim.state.simTime, ratio: sim.state.ratio,
+        evScan: ev && sim.detector.detect(ev.sim), Hs: sim.sea.Hs,
+        ratioText: document.getElementById('v-ratio').textContent,
+      };
+    });
+    assert.equal(s.count, 1, 'the window between the scans is counted');
+    assert.ok(s.ev.sim > t0 && s.ev.sim < t1, `lastEvent.sim ${s.ev.sim} is the sub-step in (${t0}, ${t1})`);
+    assert.ok(s.ev.ratio >= 2, `event ratio ${s.ev.ratio}`);
+    near(s.ev.ratio, s.evScan.Hmax / s.Hs, 1e-12, 'event ratio is the scan at lastEvent.sim');
+    assert.deepEqual([s.ev.xM, s.ev.yM, s.ev.eta], [s.evScan.xM, s.evScan.yM, s.evScan.eta], 'event crest is the scan at lastEvent.sim');
+    assert.equal(s.simTime, t1, 'no auto-freeze: the sea stays at t');
+    assert.ok(s.ratio < 2, `the stats show the scan at t (${s.ratio})`);
+    assert.equal(s.ratioText, r.b.toFixed(2));
+
+    assert.deepEqual(onlyErrors(log), []);
+  } finally {
+    await page.close();
+  }
+});
+
 test('reset after an event hides the alert, the beacon and the count', T, async () => {
   const page = await newPage(browser);
   const log = collectConsole(page);
