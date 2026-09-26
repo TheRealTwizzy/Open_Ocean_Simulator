@@ -280,14 +280,18 @@ test('375x812: nothing spills sideways, and every popover opens as a full-width 
   }
 });
 
-test('375x812 and 390x844: dock tooltips stay on screen when shown', T, async () => {
-  const page = await newPage(browser, { width: 375, height: 812 });
+test('320x568, 375x812 and 390x844: the dock fits and its tooltips stay on screen when shown', T, async () => {
+  const page = await newPage(browser, { width: 320, height: 568 });
   try {
     await open(page, server.url, '?q=low');
     const spill = [];
-    for (const [w, h] of [[375, 812], [390, 844]]) {
-      if (w !== 375) await setViewport(page, w, h);
+    for (const [w, h] of [[320, 568], [375, 812], [390, 844]]) {
+      if (w !== 320) await setViewport(page, w, h);
       await settle(page);
+      await unhover(page);
+      const { blocks, W, H } = await hudBlocks(page);
+      spill.push(...offscreen(pick(blocks, ['dock']), W, H).map(c => `${w}x${h}: ${c}`));
+      spill.push(...collisions(pick(blocks, ['dock'])).map(c => `${w}x${h}: ${c}`));
       const n = await page.locator('#dock .dock-btn').count();
       for (let i = 0; i < n; i++) {
         await page.locator('#dock .dock-btn').nth(i).hover({ force: true });
@@ -423,24 +427,54 @@ test('no WebGL: the fallback panel fits in portrait and at 844x390, the 2D drawe
   }
 });
 
-// At <= 720 px wide the stats drop below the brand and the 2D drawer overlaps
-// them on a short screen; only the panel's own collisions are checked here.
+// At 320 px tall the 2D drawer (top at H - 270) reaches up over the brand and
+// the stats, whatever the panel does; there only the panel's own collisions
+// are checked. From 630 px wide the stats move up beside the brand, clear of
+// the drawer, so every pair is checked.
 test('no WebGL on short landscapes: the fallback panel leaves the brand, stats, drawer and dock uncovered', T, async () => {
   const page = await newPage(browser, { width: 844, height: 390 });
   try {
     await open(page, server.url, '?q=low', { nogl: true });
     const bad = [];
-    for (const [w, h] of [[844, 390], [740, 360], [667, 375], [812, 375], [640, 360]]) {
+    for (const [w, h] of [[844, 390], [740, 360], [667, 375], [812, 375], [640, 360], [568, 320], [480, 320]]) {
       if (w !== 844) await setViewport(page, w, h);
       await settle(page);
       const { blocks, W, H } = await hudBlocks(page);
       const where = `${w}x${h}`;
       assert.ok(blocks.nogl, `${where}: #nogl is rendered`);
       assert.equal(await page.isVisible('#nogl h2'), true, `${where}: the panel heading shows`);
-      for (const other of ['brand', 'stats', 'drawer', 'dock']) bad.push(...collisions(pick(blocks, ['nogl', other])).map(c => `${where}: ${c}`));
-      bad.push(...offscreen(pick(blocks, ['nogl']), W, H).map(c => `${where}: ${c}`));
+      if (w >= 630) bad.push(...collisions(pick(blocks, ['nogl', 'brand', 'stats', 'drawer', 'dock'])).map(c => `${where}: ${c}`));
+      else for (const other of ['brand', 'stats', 'drawer', 'dock']) bad.push(...collisions(pick(blocks, ['nogl', other])).map(c => `${where}: ${c}`));
+      bad.push(...offscreen(pick(blocks, ['nogl', 'drawer', 'dock']), W, H).map(c => `${where}: ${c}`));
     }
     assert.deepEqual(bad, []);
+  } finally {
+    await page.close();
+  }
+});
+
+// Between 481 and ~631 px tall the desktop panel (top: 22%) used to cover the
+// top of the 2D drawer, which opens by itself without WebGL.
+test('no WebGL at mid heights: the fallback panel clears the brand, stats, drawer and dock', T, async () => {
+  const page = await newPage(browser, { width: 800, height: 600 });
+  try {
+    await open(page, server.url, '?q=low', { nogl: true });
+    const bad = [];
+    for (const [w, h] of [[800, 600], [800, 481], [800, 540], [1280, 631], [1024, 590], [760, 620]]) {
+      if (w !== 800 || h !== 600) await setViewport(page, w, h);
+      await settle(page);
+      const { blocks, W, H } = await hudBlocks(page);
+      const where = `${w}x${h}`;
+      assert.ok(blocks.nogl && blocks.drawer, `${where}: #nogl and #drawer are rendered`);
+      assert.equal(await page.isVisible('#nogl h2'), true, `${where}: the panel heading shows`);
+      bad.push(...collisions(pick(blocks, ['nogl', 'brand', 'stats', 'drawer', 'dock'])).map(c => `${where}: ${c}`));
+      bad.push(...offscreen(pick(blocks, ['nogl', 'drawer', 'dock']), W, H).map(c => `${where}: ${c}`));
+    }
+    assert.deepEqual(bad, []);
+    // tall enough: the full panel, explanation included
+    await setViewport(page, 800, 600);
+    await settle(page);
+    assert.equal(await page.isVisible('#nogl p'), true, '800x600: the explanation shows');
   } finally {
     await page.close();
   }
