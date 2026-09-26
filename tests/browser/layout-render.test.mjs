@@ -2,7 +2,8 @@
 // HUD blocks that must not collide, the short-landscape rules), the no-WebGL
 // fallback, and three pixel checks on pinned frames: no foam speckle at
 // steepness 0, the far plane never drawing inside the displaced mesh, and the
-// sky (and its reflection on the water) surviving a WebGL context loss.
+// sky (and its reflection on the water) surviving a WebGL context loss, with a
+// quality switch after the restore that logs no WebGL warnings.
 // Run: npm run test:browser
 //
 // Pixel checks pause the sea, pin its time, render synchronously in the page
@@ -508,7 +509,7 @@ test('the far plane never draws inside the displaced mesh footprint (wind 14, or
   }
 });
 
-test('after a WebGL context loss and restore, the sky and its reflection on the water come back', T, async () => {
+test('after a WebGL context loss and restore, the sky and its reflection on the water come back, and a quality switch is clean', T, async () => {
   const page = await newPage(browser, { width: 640, height: 480 });
   const log = collectConsole(page);
   await page.addInitScript(pixelKit);
@@ -566,11 +567,23 @@ test('after a WebGL context loss and restore, the sky and its reflection on the 
       assert.ok(after[k].meanAbs <= 3, `${k} matches the pre-loss frame (mean |diff| ${after[k].meanAbs.toFixed(2)} levels, max ${after[k].max})`);
     }
 
+    // A quality switch disposes the pre-loss mesh geometry. three re-creates
+    // its internals on restore, so a dispose listener left over from the lost
+    // context would delete that context's buffers and VAO, which Chrome reports
+    // as 'WebGL: INVALID_OPERATION: delete: object does not belong to this context'.
+    const switched = await evalSim(page, sim => {
+      const before = sim.ocean.mesh.geometry.parameters.segments;
+      sim.actions.setQuality('med');
+      return { before, after: sim.ocean.mesh.geometry.parameters.segments };
+    });
+    assert.deepEqual(switched, { before: 160, after: 256 }, 'low -> med rebuilt the mesh');
+    await waitFrames(page, 3);
+
     assert.deepEqual(onlyErrors(log), []);
-    // WebGL misuse after the restore shows up as 'WebGL: ...' warnings. The
-    // 'object does not belong to this context' ones belong to a known issue on
-    // the next quality switch (fixed elsewhere); this test never switches.
-    const glWarnings = log.filter(e => e.type === 'warning' && /WebGL: /.test(e.text) && !/object does not belong to this context/.test(e.text));
+    // WebGL misuse after the restore shows up as 'WebGL: ...' warnings
+    const foreign = log.filter(e => /does not belong to this context/.test(e.text));
+    assert.deepEqual(foreign, [], 'no deletes of objects from the lost context');
+    const glWarnings = log.filter(e => e.type === 'warning' && /WebGL: /.test(e.text));
     assert.deepEqual(glWarnings, [], 'no WebGL errors reported as warnings');
   } finally {
     await page.close();
