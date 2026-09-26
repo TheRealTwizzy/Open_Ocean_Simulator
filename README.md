@@ -74,3 +74,16 @@ vendor/             three.module.min.js, OrbitControls.js, Sky.js (r170)
 
 Render quality is auto-picked (`?q=low|med|high` overrides it) and steps down,
 up to twice, if the GPU cannot hold ~22 fps. Everything works offline once loaded.
+
+## Tests
+
+```
+npm test                          # physics unit tests (Node 22, no dependencies)
+npm ci                            # once, for the browser tests
+npx playwright install chromium
+npm run test:browser              # boots the app in headless Chromium (SwiftShader WebGL2)
+```
+
+The unit tests check the wave maths in `js/physics.js` directly; the browser
+tests serve the repo over a local HTTP server and drive the real page through
+the `window.__sim` hook. CI runs both on every push and pull request.
