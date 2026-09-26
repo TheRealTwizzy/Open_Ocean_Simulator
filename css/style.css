@@ -445,12 +445,14 @@ input[type="range"]::-moz-range-thumb {
   .nogl h2 { font-size: 13px; margin: 0; }
   .nogl p { display: none; }
 }
-/* 630-720 px wide and short: the stats go back up beside the brand, clear of the 2D drawer */
+/* 630-720 px wide and short: the stats go back up beside the brand, clear of the 2D drawer
+   (300 px leaves the brand's 278 px and keeps the ~324 px stats on one row from 630 up) */
 @media (min-width: 630px) and (max-width: 720px) and (max-height: 480px) {
-  .stats { top: 16px; left: auto; right: 16px; max-width: calc(100vw - 310px); }
+  .stats { top: 16px; left: auto; right: 16px; max-width: calc(100vw - 300px); }
 }
-/* under ~600 px wide and short there is no room beside the dock: a compact tag at the top right, above the drawer */
-@media (max-width: 599px) and (max-height: 480px) {
+/* under 630 px wide and short the corner beside the dock is too narrow (the first dock
+   button starts left of x 134 up to ~620 px): a compact tag at the top right, above the drawer */
+@media (max-width: 629px) and (max-height: 480px) {
   .nogl { bottom: auto; top: 16px; left: auto; right: 16px; width: auto; padding: 6px 10px; }
   .nogl h2 { font-size: 12px; line-height: 1.25; white-space: nowrap; }
 }
