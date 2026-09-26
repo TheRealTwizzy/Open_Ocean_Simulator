@@ -31,6 +31,12 @@ export function initUI({ state, sea, actions }) {
     pop.style.setProperty('--x', x + 'px');
   }
 
+  // keyboard users get focus handed back to the trigger; pointer users get it
+  // dropped so Space stays the pause shortcut after a click
+  let keyboardInput = false;
+  document.addEventListener('keydown', () => { keyboardInput = true; }, true);
+  document.addEventListener('pointerdown', () => { keyboardInput = false; }, true);
+
   function closePop(restoreFocus = true) {
     if (!openPop) return;
     const btn = openBtn;
@@ -38,9 +44,10 @@ export function initUI({ state, sea, actions }) {
     btn.setAttribute('aria-expanded', 'false');
     openPop = openBtn = null;
     backdrop.hidden = true;
-    if (restoreFocus && (openPopHadFocus() || document.activeElement === document.body)) btn.focus({ preventScroll: true });
+    if (!restoreFocus) return;
+    if (keyboardInput) btn.focus({ preventScroll: true });
+    else if (document.activeElement && document.activeElement.closest('.popover, .dock')) document.activeElement.blur();
   }
-  const openPopHadFocus = () => document.activeElement && document.activeElement.closest('.popover');
 
   function openPopover(pop, btn) {
     const same = openPop === pop;
@@ -57,9 +64,10 @@ export function initUI({ state, sea, actions }) {
   dock.querySelectorAll('.dock-btn').forEach(btn => {
     const id = btn.dataset.pop;
     if (id) { btn.setAttribute('aria-controls', id); $(id).tabIndex = -1; }
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', e => {
       ping(btn);
       if (id) openPopover($(id), btn);
+      else if (e.detail > 0) btn.blur();
     });
   });
   backdrop.addEventListener('click', () => closePop());
@@ -70,10 +78,9 @@ export function initUI({ state, sea, actions }) {
       return;
     }
     const tag = e.target.tagName;
-    // inside a panel, Space belongs to its buttons and scrollable body; anywhere else it pauses
-    const inPanel = e.target.closest && e.target.closest('.popover, .drawer, .buoy-readout');
-    const panelControl = inPanel && (tag === 'BUTTON' || e.target.classList.contains('body'));
-    if (e.code === 'Space' && tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA' && !panelControl) {
+    // Space activates a focused button or scrolls a focused panel body; anywhere else it pauses
+    const scroller = e.target.classList && e.target.classList.contains('body');
+    if (e.code === 'Space' && tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA' && tag !== 'BUTTON' && !scroller) {
       e.preventDefault();
       actions.togglePause();
     }
@@ -316,9 +323,9 @@ export function initUI({ state, sea, actions }) {
   function resize2d() {
     if ($('drawer').hidden) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const r = canvas2d.getBoundingClientRect();
-    canvas2d.width = Math.round(r.width * dpr);
-    canvas2d.height = Math.round(r.height * dpr);
+    const w = Math.round(canvas2d.clientWidth * dpr), h = Math.round(canvas2d.clientHeight * dpr);
+    if (canvas2d.width !== w) canvas2d.width = w;
+    if (canvas2d.height !== h) canvas2d.height = h;
   }
 
   function renderLegend() {
@@ -332,7 +339,7 @@ export function initUI({ state, sea, actions }) {
   function draw2d(t, wallNow, Hmax) {
     if ($('drawer').hidden) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    if (canvas2d.width !== Math.round(canvas2d.clientWidth * dpr) || canvas2d.height !== Math.round(canvas2d.clientHeight * dpr)) resize2d();
+    resize2d();
     const W = canvas2d.width / dpr, H = canvas2d.height / dpr;
     if (W < 10 || H < 10) return;
     const n = Math.max(2, Math.ceil(W / 2) + 1);
@@ -421,8 +428,8 @@ export function initUI({ state, sea, actions }) {
     const on = state.trains.filter(t => t.on);
     let html;
     if (on.length === 0) html = '<b>No trains:</b> only the wind sea is running. Add a wave train to build interference.';
-    else if (on.length === 1 && state.wind < 0.5) html = '<b>One train, no wind:</b> a lone focused group peaks around 1.7–1.8 H<sub>s</sub> and never reaches 2. Add a second train on a different heading to reach rogue territory.';
-    else if (on.length === 1) html = '<b>One train:</b> the group alone stays under 2 H<sub>s</sub>, but the wind sea\'s random crests ride on top of its focus and can carry it over the line. Add a second train for the big, regular bursts.';
+    else if (on.length === 1 && state.wind < 5) html = '<b>One train:</b> a lone focused group peaks around 1.7–1.8 H<sub>s</sub> and never reaches 2 in still or light air. Add a second train on a different heading to reach rogue territory.';
+    else if (on.length === 1) html = '<b>One train, fresh wind:</b> the group alone stays under 2 H<sub>s</sub>, but from ~5 m/s the wind sea\'s random crests ride on top of its focus and can carry it over the line. Add a second train for the big, regular bursts.';
     else if (on.some(a => on.some(b => a !== b && Math.abs(a.freq - b.freq) < 0.012)))
       html = '<b>Beat pattern:</b> two trains share nearly the same frequency, so you get slow beats — broad zones of reinforcement and cancellation — rather than sharp focusing events.';
     else if (!state.dispersion) html = '<b>Dispersion off:</b> each train is a rigid group that never spreads out. Rogues now happen whenever two focused groups cross — more often, less realistically.';

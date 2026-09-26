@@ -403,6 +403,16 @@ input[type="range"]::-moz-range-thumb {
   @keyframes sheetUp { from { transform: translateY(40px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 }
 
+/* short (landscape phone) viewports: no room for the sparkline, the hint or a tall fallback panel */
+@media (max-height: 480px) {
+  .buoy-readout canvas { display: none; }
+  .buoy-readout { top: 90px; left: auto; right: 16px; width: 246px; padding-bottom: 8px; }
+  .hint { display: none; }
+  .drawer { height: 150px; }
+  .nogl { top: 12px; padding: 10px 14px; }
+  .nogl p { display: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dock li, .dock-btn, .dock-btn.ping::after, .popover, .drawer, .tip, .dock-btn:hover + .tip, .dock-btn:focus-visible + .tip,
   .alert.show, .alert::before, .alert::after, .beacon::after, .popover > header::before, .drawer > header::before { animation: none !important; }
