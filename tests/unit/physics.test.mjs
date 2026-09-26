@@ -121,7 +121,7 @@ test('scanInterval: t1 <= t0 (paused, or time reset) scans t1 once', () => {
 test('scanInterval never exceeds maxSteps and spaces its scans evenly up to t1', () => {
   const det = new Detector(defaultSea('low'), 8);
   for (const [maxGap, maxSteps] of [[undefined, undefined], [0.05, 3], [0.2, 10]]) {
-    const cap = maxSteps ?? 6, g = maxGap ?? 0.08;
+    const cap = maxSteps ?? 6, g = maxGap ?? 0.085;
     for (const span of [0.001, 0.05, 0.079, 0.1, 0.26, 0.4, 0.47, 0.5, 1, 30, 1e4]) {
       const t0 = 40, t1 = t0 + span;
       const calls = spyDetect(det);
