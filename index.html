@@ -2,921 +2,206 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Rogue Wave Lab — Constructive Interference Simulator</title>
-<!-- Styling is hand-rolled (Tailwind-inspired tokens) so the file works offline with zero external dependencies. -->
-<style>
-  :root {
-    --bg-0: #030a14;
-    --bg-1: #081527;
-    --panel: #0b1a2ecc;
-    --panel-solid: #0c1b2f;
-    --border: #16324e;
-    --border-lt: #1f4266;
-    --text: #d9e8f5;
-    --muted: #7e99b5;
-    --faint: #52708c;
-    --wave-a: #38bdf8;
-    --wave-b: #a78bfa;
-    --wave-sum: #f1f5f9;
-    --accent: #2dd4bf;
-    --warn: #fbbf24;
-    --danger: #f87171;
-    --danger-deep: #ef4444;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { height: 100%; }
-  body {
-    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%);
-    color: var(--text);
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    font-size: 14px;
-    line-height: 1.5;
-    overflow-x: hidden;
-  }
-  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
-
-  .app { display: flex; min-height: 100vh; }
-  .main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; padding: 14px 16px 20px; gap: 12px; }
-
-  /* ---------- header ---------- */
-  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
-  .brand h1 { font-size: 17px; font-weight: 650; letter-spacing: 0.2px; }
-  .brand p { font-size: 11.5px; color: var(--muted); margin-top: -2px; }
-  .spacer { flex: 1 1 auto; }
-  .stats { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
-  .stat {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-    padding: 5px 11px; min-width: 84px;
-  }
-  .stat .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--faint); }
-  .stat .v { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .stat .v small { font-size: 10.5px; font-weight: 500; color: var(--muted); }
-  #stat-ratio.hot .v { color: var(--warn); }
-  #stat-ratio.rogue .v { color: var(--danger); }
-  .meter { height: 4px; border-radius: 2px; background: #12283f; margin-top: 4px; position: relative; overflow: hidden; }
-  .meter .fill { position: absolute; inset: 0 auto 0 0; width: 0%; background: var(--accent); border-radius: 2px; transition: width 90ms linear; }
-  .meter .tick { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--danger); left: 80%; }
-
-  .btn {
-    display: inline-flex; align-items: center; gap: 6px;
-    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-    padding: 7px 13px; font-size: 13px; font-weight: 550; color: var(--text);
-    transition: border-color 120ms, background 120ms;
-  }
-  .btn:hover { border-color: var(--border-lt); background: #10233b; }
-  .btn.primary { border-color: #1c5f57; background: #0d2b2c; color: var(--accent); }
-  .btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-  .seg button { padding: 7px 14px; font-size: 13px; font-weight: 600; color: var(--muted); background: var(--panel); }
-  .seg button[aria-pressed="true"] { color: var(--accent); background: #0d2b2c; }
-  .seg button:disabled { opacity: 0.4; cursor: not-allowed; }
-
-  /* ---------- canvas stage ---------- */
-  .stage {
-    position: relative; flex: 1 1 auto; min-height: 340px;
-    border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
-    background: linear-gradient(180deg, #04101f 0%, #061c33 55%, #04101f 100%);
-  }
-  canvas { display: block; width: 100%; height: 100%; }
-  #sea3 { touch-action: none; cursor: grab; }
-  #sea3:active { cursor: grabbing; }
-  .hidden { display: none !important; }
-
-  .legend {
-    position: absolute; top: 10px; left: 12px; display: flex; gap: 14px; flex-wrap: wrap;
-    font-size: 11.5px; color: var(--muted); pointer-events: none;
-    background: #030a1499; padding: 4px 10px; border-radius: 6px;
-  }
-  .legend span { display: inline-flex; align-items: center; gap: 6px; }
-  .swatch { width: 16px; height: 3px; border-radius: 2px; display: inline-block; }
-  .hint3d {
-    position: absolute; top: 10px; right: 12px; font-size: 11px; color: var(--faint);
-    background: #030a1499; padding: 3px 9px; border-radius: 6px; pointer-events: none;
-  }
-
-  .beacon {
-    position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none;
-    border-radius: 50%; background: #fca5a5; box-shadow: 0 0 12px #ef4444;
-  }
-  .beacon::after {
-    content: ""; position: absolute; inset: -12px; border: 2px solid var(--danger);
-    border-radius: 50%; animation: beaconPulse 1.1s ease-out infinite;
-  }
-  @keyframes beaconPulse { 0% { transform: scale(0.4); opacity: 1; } 100% { transform: scale(1.6); opacity: 0; } }
-
-  .alert-overlay {
-    position: absolute; inset: 0; display: none; pointer-events: none;
-    align-items: flex-start; justify-content: center; padding-top: 26px;
-    background: radial-gradient(ellipse at center, transparent 40%, rgba(239,68,68,0.16) 100%);
-  }
-  .alert-overlay.show { display: flex; animation: alertFlash 0.55s ease-in-out 3; }
-  .alert-banner {
-    background: #2a0a0ae6; border: 1px solid var(--danger-deep); border-radius: 10px;
-    padding: 10px 22px; text-align: center;
-    box-shadow: 0 0 34px rgba(239,68,68,0.45);
-  }
-  .alert-banner .title { font-size: 17px; font-weight: 750; letter-spacing: 1.5px; color: var(--danger); }
-  .alert-banner .sub { font-size: 12px; color: #fca5a5; margin-top: 2px; font-variant-numeric: tabular-nums; }
-  @keyframes alertFlash { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
-  @media (prefers-reduced-motion: reduce) { .alert-overlay.show { animation: none; } .beacon::after { animation: none; } }
-
-  .frozen-note {
-    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
-    font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--warn);
-    background: #1f160399; border: 1px solid #4d3a10; border-radius: 6px; padding: 3px 10px;
-    display: none; pointer-events: none;
-  }
-  .frozen-note.show { display: block; }
-
-  /* ---------- controls ---------- */
-  .controls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
-  .card {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;
-  }
-  .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; display: flex; align-items: center; gap: 7px; }
-  .card h2 .dot { width: 9px; height: 9px; border-radius: 50%; }
-  .card.train-a h2 { color: var(--wave-a); }
-  .card.train-b h2 { color: var(--wave-b); }
-  .card.global h2 { color: var(--accent); }
-  .ctl { margin-bottom: 9px; }
-  .ctl:last-child { margin-bottom: 0; }
-  .ctl label { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
-  .ctl output { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
-  input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 22px; background: transparent; cursor: pointer; }
-  input[type="range"]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: #143253; }
-  input[type="range"]::-moz-range-track { height: 4px; border-radius: 2px; background: #143253; }
-  input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; margin-top: -5px;
-    background: var(--text); border: 2px solid var(--accent);
-  }
-  input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: var(--text); border: 2px solid var(--accent); }
-  .train-a input[type="range"]::-webkit-slider-thumb { border-color: var(--wave-a); }
-  .train-b input[type="range"]::-webkit-slider-thumb { border-color: var(--wave-b); }
-  .train-a input[type="range"]::-moz-range-thumb { border-color: var(--wave-a); }
-  .train-b input[type="range"]::-moz-range-thumb { border-color: var(--wave-b); }
-  .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--muted); margin-top: 10px; }
-  .toggle-row input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
-
-  /* ---------- sidebar ---------- */
-  .sidebar {
-    flex: 0 0 330px; max-width: 330px; border-left: 1px solid var(--border);
-    background: var(--panel-solid); padding: 16px 18px 28px; overflow-y: auto; max-height: 100vh;
-    position: sticky; top: 0;
-  }
-  .sidebar.hidden { display: none; }
-  .sidebar h2 { font-size: 14px; font-weight: 650; margin-bottom: 4px; }
-  .sidebar .close { float: right; color: var(--muted); font-size: 17px; padding: 0 4px; }
-  .sidebar .close:hover { color: var(--text); }
-  .tip {
-    background: #0d2b2c; border: 1px solid #1c5f57; border-left: 3px solid var(--accent);
-    border-radius: 8px; padding: 9px 11px; font-size: 12.5px; margin: 10px 0 16px; color: #b8ece4;
-  }
-  .tip b { color: var(--accent); }
-  .sidebar section { margin-bottom: 16px; }
-  .sidebar h3 { font-size: 12.5px; font-weight: 650; color: var(--accent); margin-bottom: 4px; letter-spacing: 0.2px; }
-  .sidebar p { font-size: 12.5px; color: #a9c0d6; margin-bottom: 6px; }
-  .sidebar .eq {
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
-    background: #071120; border: 1px solid var(--border); border-radius: 6px;
-    padding: 6px 9px; margin: 6px 0; color: var(--text); overflow-x: auto; white-space: nowrap;
-  }
-  .sidebar .a { color: var(--wave-a); font-weight: 600; }
-  .sidebar .b { color: var(--wave-b); font-weight: 600; }
-  .sidebar .r { color: var(--warn); font-weight: 600; }
-
-  @media (max-width: 980px) {
-    .controls { grid-template-columns: 1fr; }
-    .sidebar {
-      position: fixed; inset: 0 0 0 auto; width: min(330px, 88vw); max-width: none; z-index: 40;
-      box-shadow: -18px 0 40px #000a; max-height: none;
-    }
-    .stage { min-height: 260px; }
-  }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="description" content="An immersive open-ocean simulator: crossing wave trains, a wind sea, and rogue waves born from constructive interference.">
+<title>Open Ocean Simulator — Rogue Wave Lab</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23061c33'/%3E%3Cpath d='M4 14c3-5 6-5 9 0s6 5 9 0 5-5 6 0' fill='none' stroke='%2322d3ee' stroke-width='2.2' stroke-linecap='round'/%3E%3Cpath d='M4 21c3-5 6-5 9 0s6 5 9 0 5-5 6 0' fill='none' stroke='%2322d3ee' stroke-width='2.2' stroke-linecap='round' opacity='.55'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
 </head>
 <body>
-<div class="app">
-  <div class="main">
-    <header>
-      <div class="brand">
-        <h1>Rogue Wave Lab</h1>
-        <p>Deep-ocean rogue wave formation by constructive interference</p>
-      </div>
-      <div class="spacer"></div>
-      <div class="stats">
-        <div class="stat"><div class="k">H<sub>s</sub> (sig. height)</div><div class="v"><span id="v-hs">–</span><small> m</small></div></div>
-        <div class="stat"><div class="k">H<sub>max</sub> now</div><div class="v"><span id="v-hmax">–</span><small> m</small></div></div>
-        <div class="stat" id="stat-ratio">
-          <div class="k">H<sub>max</sub> / H<sub>s</sub> <span style="color:var(--danger)">(rogue ≥ 2)</span></div>
-          <div class="v" id="v-ratio">–</div>
-          <div class="meter"><div class="fill" id="meter-fill"></div><div class="tick"></div></div>
-        </div>
-        <div class="stat"><div class="k">Rogue events</div><div class="v" id="v-count">0</div></div>
-      </div>
-      <div class="seg" role="group" aria-label="View mode">
-        <button id="btn-2d" aria-pressed="false">2D</button>
-        <button id="btn-3d" aria-pressed="false">3D</button>
-      </div>
-      <button class="btn primary" id="btn-pause" aria-pressed="false">⏸ Pause</button>
-      <button class="btn" id="btn-reset">↺ Reset</button>
-      <button class="btn" id="btn-sidebar" aria-pressed="true">ⓘ Physics</button>
-    </header>
+<canvas id="gl" aria-label="3D ocean surface"></canvas>
 
-    <div class="stage">
-      <canvas id="sea"></canvas>
-      <canvas id="sea3" class="hidden"></canvas>
-      <div class="legend" id="legend-2d">
-        <span><i class="swatch" style="background:var(--wave-a)"></i>Wave Train A</span>
-        <span><i class="swatch" style="background:var(--wave-b)"></i>Wave Train B</span>
-        <span><i class="swatch" style="background:var(--wave-sum);height:4px"></i>Resulting Sea State (A + B)</span>
-      </div>
-      <div class="legend hidden" id="legend-3d">
-        <span><i class="swatch" style="background:linear-gradient(90deg,#04121f,#4d9fd9)"></i>Surface height (A + B)</span>
-        <span><i class="swatch" style="background:#f88c59"></i>Crest above H<sub>s</sub> — rogue zone</span>
-      </div>
-      <div class="hint3d hidden" id="hint3d">drag to rotate</div>
-      <div class="beacon hidden" id="beacon"></div>
-      <div class="alert-overlay" id="alert">
-        <div class="alert-banner">
-          <div class="title">⚠ ROGUE WAVE DETECTED</div>
-          <div class="sub" id="alert-sub"></div>
-        </div>
-      </div>
-      <div class="frozen-note" id="frozen-note">Simulation frozen — inspecting convergence</div>
-    </div>
+<div id="hud">
+  <header class="brand glass">
+    <h1>Open Ocean Simulator</h1>
+    <p>Rogue waves by constructive interference</p>
+  </header>
 
-    <div class="controls">
-      <div class="card train-a">
-        <h2><span class="dot" style="background:var(--wave-a)"></span>Wave Train A</h2>
-        <div class="ctl"><label for="a-amp">Amplitude <output id="a-amp-v"></output></label>
-          <input type="range" id="a-amp" min="0.2" max="4" step="0.05" value="1.8"></div>
-        <div class="ctl"><label for="a-freq">Frequency <output id="a-freq-v"></output></label>
-          <input type="range" id="a-freq" min="0.05" max="0.3" step="0.005" value="0.15"></div>
-        <div class="ctl"><label for="a-speed">Propagation speed <output id="a-speed-v"></output></label>
-          <input type="range" id="a-speed" min="2" max="16" step="0.25" value="10.5"></div>
-        <div class="ctl"><label for="a-dir">Direction (heading) <output id="a-dir-v"></output></label>
-          <input type="range" id="a-dir" min="-60" max="60" step="5" value="0"></div>
-      </div>
-      <div class="card train-b">
-        <h2><span class="dot" style="background:var(--wave-b)"></span>Wave Train B</h2>
-        <div class="ctl"><label for="b-amp">Amplitude <output id="b-amp-v"></output></label>
-          <input type="range" id="b-amp" min="0.2" max="4" step="0.05" value="1.6"></div>
-        <div class="ctl"><label for="b-freq">Frequency <output id="b-freq-v"></output></label>
-          <input type="range" id="b-freq" min="0.05" max="0.3" step="0.005" value="0.11"></div>
-        <div class="ctl"><label for="b-speed">Propagation speed <output id="b-speed-v"></output></label>
-          <input type="range" id="b-speed" min="2" max="16" step="0.25" value="6.5"></div>
-        <div class="ctl"><label for="b-dir">Direction (heading) <output id="b-dir-v"></output></label>
-          <input type="range" id="b-dir" min="-60" max="60" step="5" value="30"></div>
-      </div>
-      <div class="card global">
-        <h2><span class="dot" style="background:var(--accent)"></span>Simulation</h2>
-        <div class="ctl"><label for="g-speed">Time step / speed <output id="g-speed-v"></output></label>
-          <input type="range" id="g-speed" min="0" max="8" step="0.25" value="2.5"></div>
-        <div class="toggle-row">
-          <label for="g-freeze">Auto-freeze on rogue detection (1.6 s)</label>
-          <input type="checkbox" id="g-freeze" checked>
-        </div>
-        <div class="toggle-row" style="margin-top:6px">
-          <span style="font-size:11.5px;color:var(--faint)">Each train is a narrow-band group of 7 components — the honest model of a storm swell. Direction sliders create crossing seas in 3D. See the Physics panel.</span>
-        </div>
-      </div>
+  <div class="stats glass" id="stats">
+    <div class="stat"><span class="k">H<sub>s</sub></span><span class="v"><b id="v-hs">–</b> m</span></div>
+    <div class="stat"><span class="k">H<sub>max</sub></span><span class="v"><b id="v-hmax">–</b> m</span></div>
+    <div class="stat ratio" id="stat-ratio">
+      <span class="k">H<sub>max</sub> / H<sub>s</sub></span><span class="v"><b id="v-ratio">–</b></span>
+      <div class="meter"><div class="fill" id="meter-fill"></div><i class="tick"></i></div>
     </div>
+    <div class="stat"><span class="k">Rogues</span><span class="v"><b id="v-count">0</b></span></div>
   </div>
 
-  <aside class="sidebar" id="sidebar" aria-label="Physics explainer">
-    <button class="close" id="btn-close-sidebar" title="Close panel">✕</button>
-    <h2>How rogue waves form</h2>
-    <div class="tip" id="tip"><b>Tip:</b> in 2D, the white line is the literal sum of the blue and violet lines at every point.</div>
+  <div class="alert" id="alert" role="alert" aria-live="assertive">
+    <div class="banner">
+      <div class="title">Rogue wave detected</div>
+      <div class="sub" id="alert-sub"></div>
+    </div>
+  </div>
+  <div class="frozen" id="frozen">Frozen — inspecting the convergence</div>
+  <div class="beacon" id="beacon" hidden></div>
+  <div class="hint glass" id="hint">Drag to orbit · scroll to zoom · click the water to splash</div>
 
-    <section>
+  <div class="buoy-readout glass" id="buoy-readout" hidden>
+    <div class="row">
+      <span class="k">Buoy η</span>
+      <span class="v"><b id="buoy-eta">0.00</b> m</span>
+      <button class="mini" id="buoy-remove">remove</button>
+    </div>
+    <div class="row sub">
+      <span class="k">last 12 s</span>
+      <span class="v">min <b id="buoy-min">0.0</b></span>
+      <span class="v">max <b id="buoy-max">0.0</b></span>
+    </div>
+    <canvas id="buoy-spark" width="220" height="46" aria-label="Buoy elevation, last 12 seconds"></canvas>
+  </div>
+
+  <section class="drawer glass" id="drawer" hidden aria-label="2D superposition view">
+    <header>
+      <h2>Superposition along the centre line</h2>
+      <div class="legend" id="legend-2d"></div>
+      <button class="icon-btn" id="drawer-close" aria-label="Close 2D view">✕</button>
+    </header>
+    <canvas id="sea2d"></canvas>
+  </section>
+
+  <div class="backdrop" id="backdrop" hidden></div>
+
+  <section class="popover" id="pop-trains" hidden aria-labelledby="pop-trains-title">
+    <header><h2 id="pop-trains-title">Wave trains</h2><span class="count" id="train-count"></span></header>
+    <div class="body">
+      <div id="train-list"></div>
+      <button class="btn wide" id="add-train">+ Add wave train</button>
+      <p class="note">Each train is a group of 7 components that focus and disperse. The wind sea underneath is set in Settings and counts toward H<sub>s</sub>.</p>
+    </div>
+  </section>
+
+  <section class="popover" id="pop-settings" hidden aria-labelledby="pop-settings-title">
+    <header><h2 id="pop-settings-title">Settings</h2></header>
+    <div class="body">
+      <div class="ctl"><label for="s-wind">Wind speed <output id="s-wind-v"></output></label><input type="range" id="s-wind" min="0" max="15" step="0.5"></div>
+      <div class="ctl"><label for="s-winddir">Wind heading <output id="s-winddir-v"></output></label><input type="range" id="s-winddir" min="-180" max="180" step="5"></div>
+      <div class="ctl"><label for="s-steep">Crest steepness (visual chop) <output id="s-steep-v"></output></label><input type="range" id="s-steep" min="0" max="0.9" step="0.05"></div>
+      <div class="ctl"><label for="s-time">Time speed <output id="s-time-v"></output></label><input type="range" id="s-time" min="0" max="8" step="0.25"></div>
+      <label class="toggle"><span>Deep-water dispersion (ω² = g·k)</span><input type="checkbox" id="s-disp"><i></i></label>
+      <label class="toggle"><span>Tint crests above H<sub>s</sub></span><input type="checkbox" id="s-tint"><i></i></label>
+      <label class="toggle"><span>Auto-freeze on detection (1.6 s)</span><input type="checkbox" id="s-freeze"><i></i></label>
+      <div class="ctl row-ctl"><label for="s-quality">Render quality</label>
+        <select id="s-quality"><option value="auto">Auto</option><option value="low">Low</option><option value="med">Medium</option><option value="high">High</option></select>
+      </div>
+      <button class="btn wide" id="btn-reset">↺ Reset simulation</button>
+    </div>
+  </section>
+
+  <section class="popover" id="pop-click" hidden aria-labelledby="pop-click-title">
+    <header><h2 id="pop-click-title">Click on the water</h2></header>
+    <div class="body">
+      <div class="seg" role="group" aria-label="Click mode">
+        <button data-mode="splash" aria-pressed="true">Splash</button>
+        <button data-mode="buoy" aria-pressed="false">Buoy</button>
+      </div>
+      <p class="note" id="click-note"></p>
+    </div>
+  </section>
+
+  <section class="popover" id="pop-camera" hidden aria-labelledby="pop-camera-title">
+    <header><h2 id="pop-camera-title">Camera</h2></header>
+    <div class="body">
+      <div class="seg" role="group" aria-label="Camera preset">
+        <button data-cam="orbit" aria-pressed="true">Orbit</button>
+        <button data-cam="surface" aria-pressed="false">Surface</button>
+      </div>
+      <p class="note">Drag to rotate, scroll or pinch to zoom. Orbit looks down on the 600 × 320 m detection area; Surface puts you a few metres above the water.</p>
+    </div>
+  </section>
+
+  <section class="popover wide-pop" id="pop-physics" hidden aria-labelledby="pop-physics-title">
+    <header><h2 id="pop-physics-title">How rogue waves form</h2></header>
+    <div class="body prose">
+      <div class="tip" id="tip"></div>
+
       <h3>Superposition</h3>
-      <p>The ocean surface obeys (to first order) a linear wave equation, so overlapping wave systems simply add. At every horizontal position:</p>
-      <div class="eq"><span class="r">η(x,y,t)</span> = <span class="a">η_A(x,y,t)</span> + <span class="b">η_B(x,y,t)</span></div>
-      <p>Where crests of <span class="a">A</span> and <span class="b">B</span> coincide, the surface elevations reinforce — <em>constructive interference</em>. Where a crest meets a trough, they cancel. The 2D view shows a single slice through the sea; the 3D view shows the whole surface.</p>
-    </section>
+      <p>To first order the ocean surface obeys a linear wave equation, so overlapping wave systems simply add. At every point the elevation is the sum of every component of every train plus the wind sea:</p>
+      <div class="eq">η(x,y,t) = Σ aᵢ · cos( kᵢ (x cosθᵢ + y sinθᵢ) − ωᵢ t + φᵢ )</div>
+      <p>Where crests coincide the surface reinforces — <em>constructive interference</em>. Where a crest meets a trough they cancel. Open the 2D view to watch the sum being taken along the centre line.</p>
 
-    <section>
-      <h3>Linear focusing</h3>
-      <p>A real storm swell is not one sine wave but a <em>band</em> of components with slightly different frequencies. Here each train bundles 7 such components. Most of the time their phases are scrambled and the sea looks moderate — the energy is spread out.</p>
-      <p>Occasionally the components drift into step at one point in space: their amplitudes add coherently and a single towering crest appears, then vanishes as the phases drift apart again. That transient pile-up of otherwise ordinary wave energy is <em>linear (dispersive) focusing</em> — the leading explanation for many deep-water rogue waves.</p>
-    </section>
+      <h3>Wave trains are focused groups</h3>
+      <p>A real swell is not one sine wave but a <em>band</em> of frequencies. Each train here bundles 7 components spread over ±<b>bandwidth</b> around its peak frequency, with phases arranged so they all line up at one point — a <em>focused wave group</em>, the same trick wave tanks use to make rogue waves to order.</p>
+      <p>In deep water each frequency travels at its own speed (<b>dispersion</b>, ω² = g·k, so c = g/2πf), so after focusing the components drift apart and the group flattens out — then, because the components are evenly spaced in frequency, they drift back into step every 1/Δf seconds. Wider bandwidth means a sharper, shorter-lived focus. Turn dispersion off and every component of a train shares one speed: the group becomes a rigid profile that never disperses.</p>
 
-    <section>
-      <h3>Crossing seas — why the 3D view matters</h3>
-      <p>The direction sliders point each train along its own heading. When the two systems cross at an angle, their crest <em>lines</em> intersect at a single moving point — and only there do the two systems fully reinforce. In the 3D view you can watch that intersection sweep across the sea and occasionally erupt.</p>
-      <p>Crossing wind-sea and swell is a documented real-world rogue mechanism: analyses of the Draupner wave (25.6 m in a 12 m sea, 1 January 1995 — the first rogue ever instrumentally recorded) suggest two wave systems crossing at a large angle.</p>
-    </section>
+      <h3>The wind sea</h3>
+      <p>Underneath the trains is an ambient wind sea: a <em>JONSWAP</em> spectrum for the chosen wind speed (60 km fetch), realised as ~100 random-phase components with a Gaussian directional spread about the wind heading. It is part of the sea state, so its energy counts in H<sub>s</sub> — a stronger wind raises the bar a rogue has to clear while also adding random crests that sometimes help.</p>
 
-    <section>
-      <h3>Phase alignment between trains</h3>
-      <p>The two trains travel at different speeds, so train A's wave group continually laps train B's. When both groups — and the individual crests inside them — line up at the same spot, the surface can briefly reach nearly the sum of everything: that is the flash-highlighted convergence point.</p>
-      <p>Set the two frequencies nearly equal and you will see slow <em>beats</em> instead: broad regions of reinforcement and cancellation drifting across the sea.</p>
-    </section>
+      <h3>Crossing seas and spread</h3>
+      <p>Trains with different headings cross: their crest lines only fully reinforce where they intersect, and that intersection sweeps across the sea. Crossing wind sea and swell is a documented rogue mechanism and the leading explanation for the Draupner wave (25.6 m in a 12 m sea, 1 January 1995). <b>Spread</b> fans a train's components across a range of headings, making it short-crested: focus then happens at a point rather than along a whole line, so events are rarer but more realistic.</p>
 
-    <section>
-      <h3>Significant wave height H<sub>s</sub></h3>
-      <p>Oceanographers characterize a sea state by the significant wave height, four times the standard deviation of the surface elevation:</p>
-      <div class="eq">H_s = 4·σ,&nbsp;&nbsp; σ² = Σ aᵢ²⁄2</div>
-      <p>H<sub>s</sub> is computed live from the component amplitudes of both trains. A wave qualifies as <span class="r">rogue</span> when its crest-to-trough height exceeds twice the significant height:</p>
+      <h3>Significant wave height and the rogue criterion</h3>
+      <p>A sea state is characterised by the significant wave height, four times the standard deviation of the surface:</p>
+      <div class="eq">H_s = 4·σ,&nbsp;&nbsp; σ² = Σ aᵢ² ⁄ 2</div>
+      <p>A wave is <b>rogue</b> when its crest-to-trough height, measured between successive zero down-crossings, exceeds twice the significant height:</p>
       <div class="eq">H_max &gt; 2·H_s</div>
-      <p>In 2D, dashed guide lines mark elevations of ±H<sub>s</sub>∕2 and ±H<sub>s</sub>. In 3D, any crest climbing above the H<sub>s</sub> elevation glows orange — rogue territory.</p>
-    </section>
+      <p>The detector samples the central 600 × 320 m of the sea on an 8 m grid 30 times a second and scans every row and column for zero-crossing waves. The beacon marks the crest of the tallest one when it crosses the line. Crests climbing above the H<sub>s</sub> elevation glow warm — rogue territory.</p>
 
-    <section>
+      <h3>What is visual only</h3>
+      <p>Crest <b>steepness</b> adds Gerstner-style horizontal displacement that sharpens crests and flattens troughs; foam appears where the surface folds. Splash ripples from clicking the water are decorative packets. None of these enter H<sub>s</sub> or the detector; the buoy, however, rides the full rendered surface.</p>
+
       <h3>Why rogues are rare</h3>
-      <p>Two pure sine waves can never exceed 2·H<sub>s</sub> — the statistics forbid it. It takes many components conspiring: with 14 components here, perfect alignment is possible but improbable, which is exactly why real rogue waves are rare, sudden, and were dismissed as sailors' legend until the Draupner measurement.</p>
-      <p><b>Recipe to hunt one:</b> keep the two amplitudes similar, keep a healthy speed difference between the trains, and let the simulation run. Watch the H<sub>max</sub>∕H<sub>s</sub> meter approach the red tick.</p>
-    </section>
-  </aside>
+      <p>Two pure sine waves can never exceed 2·H<sub>s</sub>. It takes many components conspiring, and even then the tallest crest of a focused group alone reaches only ~1.6 H<sub>s</sub>. A rogue needs two groups to refocus at the same place at the same time — which, with periods of 100 s and 136 s at the default settings, happens in irregular bursts a minute or two apart.</p>
+      <p><b>Recipe to hunt one:</b> keep the amplitudes comparable, keep bandwidths near 20%, spreads small, and let it run. Watch the H<sub>max</sub>/H<sub>s</sub> meter approach the red tick.</p>
+    </div>
+  </section>
+
+  <nav class="dock" id="dock" aria-label="Controls">
+    <ul>
+      <li style="--i:0;--d:-3">
+        <button class="dock-btn" id="btn-pause" aria-label="Pause" aria-pressed="false">
+          <svg class="ic-pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.2"/><rect x="14" y="5" width="4" height="14" rx="1.2"/></svg>
+          <svg class="ic-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10-6.5z"/></svg>
+        </button>
+        <span class="tip" role="tooltip">Pause <kbd>space</kbd></span>
+      </li>
+      <li style="--i:1;--d:-2">
+        <button class="dock-btn" data-pop="pop-trains" aria-label="Wave trains" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2.5 9c2.5-3.5 4.5-3.5 7 0s4.5 3.5 7 0 4.5-3.5 5 0"/><path d="M2.5 15c2.5-3.5 4.5-3.5 7 0s4.5 3.5 7 0 4.5-3.5 5 0"/></svg>
+        </button>
+        <span class="tip" role="tooltip">Wave trains</span>
+      </li>
+      <li style="--i:2;--d:-1">
+        <button class="dock-btn" data-pop="pop-settings" aria-label="Settings" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        </button>
+        <span class="tip" role="tooltip">Settings</span>
+      </li>
+      <li style="--i:3;--d:0">
+        <button class="dock-btn" id="btn-click" data-pop="pop-click" aria-label="Click mode: splash" aria-expanded="false">
+          <svg class="ic-splash" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3s-6 6.5-6 11a6 6 0 0 0 12 0c0-4.5-6-11-6-11z"/><path d="M9.5 15.5a2.5 2.5 0 0 0 2 2.3"/></svg>
+          <svg class="ic-buoy" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v7"/><circle cx="12" cy="2.6" r="1.1" fill="currentColor" stroke="none"/><path d="M7 14l1.2-4h7.6L17 14z"/><path d="M2.5 18c2.5-3 4.5-3 7 0s4.5 3 7 0 4.5-3 5 0"/></svg>
+        </button>
+        <span class="tip" role="tooltip">Click mode</span>
+      </li>
+      <li style="--i:4;--d:1">
+        <button class="dock-btn" data-pop="pop-camera" aria-label="Camera" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5h3l1.5-2.5h7L17 8.5h3a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 18v-8A1.5 1.5 0 0 1 4 8.5z"/><circle cx="12" cy="13.5" r="3.2"/></svg>
+        </button>
+        <span class="tip" role="tooltip">Camera</span>
+      </li>
+      <li style="--i:5;--d:2">
+        <button class="dock-btn" data-pop="pop-physics" aria-label="Physics explainer" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5.5A2 2 0 0 1 5.5 3.5H11a1.5 1.5 0 0 1 1 .4 1.5 1.5 0 0 1 1-.4h5.5a2 2 0 0 1 2 2v13a1 1 0 0 1-1 1H13a1 1 0 0 0-1 1 1 1 0 0 0-1-1H4.5a1 1 0 0 1-1-1z"/><path d="M12 4v16"/></svg>
+        </button>
+        <span class="tip" role="tooltip">Physics</span>
+      </li>
+      <li style="--i:6;--d:3">
+        <button class="dock-btn" id="btn-2d" aria-label="2D superposition view" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18"/><path d="M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0" opacity=".55"/><path d="M3 12c3-7 6-7 9 0s6 7 9 0"/></svg>
+        </button>
+        <span class="tip" role="tooltip">2D view</span>
+      </li>
+    </ul>
+  </nav>
+
+  <div class="nogl glass" id="nogl" hidden>
+    <h2>WebGL is unavailable</h2>
+    <p>This simulator renders the ocean on the GPU. Enable hardware acceleration or try another browser; the 2D superposition view still works below.</p>
+  </div>
 </div>
 
-<script>
-'use strict';
-(() => {
-  // ---------- world / model constants ----------
-  const WORLD_W = 600;          // metres of ocean along x
-  const WORLD_D = 320;          // metres of ocean along y (3D view depth)
-  const N_COMP = 7;             // sinusoidal components per wave train
-  const COMP_SPACING = 0.1;     // fractional frequency spacing between adjacent components
-  const ROGUE_RATIO = 2.0;      // H_max / H_s threshold (standard oceanographic definition)
-  const FREEZE_MS = 1600;
-  const COOLDOWN_MS = 6000;
-  const MARKER_MS = 3500;
-
-  const DEFAULTS = {
-    aAmp: 1.8, aFreq: 0.15, aSpeed: 10.5, aDir: 0,
-    bAmp: 1.6, bFreq: 0.11, bSpeed: 6.5, bDir: 30,
-    timeScale: 2.5,
-  };
-
-  const $ = id => document.getElementById(id);
-  const canvas = $('sea'), ctx = canvas.getContext('2d');
-  const canvas3 = $('sea3');
-
-  const controls = {
-    aAmp: $('a-amp'), aFreq: $('a-freq'), aSpeed: $('a-speed'), aDir: $('a-dir'),
-    bAmp: $('b-amp'), bFreq: $('b-freq'), bSpeed: $('b-speed'), bDir: $('b-dir'),
-    timeScale: $('g-speed'),
-  };
-  const outputs = {
-    aAmp: $('a-amp-v'), aFreq: $('a-freq-v'), aSpeed: $('a-speed-v'), aDir: $('a-dir-v'),
-    bAmp: $('b-amp-v'), bFreq: $('b-freq-v'), bSpeed: $('b-speed-v'), bDir: $('b-dir-v'),
-    timeScale: $('g-speed-v'),
-  };
-  const fmt = {
-    aAmp: v => v.toFixed(2) + ' m', bAmp: v => v.toFixed(2) + ' m',
-    aFreq: v => v.toFixed(3) + ' Hz', bFreq: v => v.toFixed(3) + ' Hz',
-    aSpeed: v => v.toFixed(2) + ' m/s', bSpeed: v => v.toFixed(2) + ' m/s',
-    aDir: v => v.toFixed(0) + '°', bDir: v => v.toFixed(0) + '°',
-    timeScale: v => v.toFixed(2) + '×',
-  };
-
-  // ---------- state ----------
-  const state = {
-    simTime: 0,
-    running: true,
-    mode: 'flat',             // 'flat' (2D) | 'surf' (3D)
-    freezeUntil: 0,
-    cooldownUntil: 0,
-    rogueCount: 0,
-    lastEvent: null,          // {xM, yM, eta, ratio, wall}
-    trainA: null, trainB: null,
-    Hs: 1,
-    lastHmax: 0,
-    yScale: 30,               // 2D px per metre (smoothed)
-    dpr: 1, W: 0, H: 0,       // CSS-pixel canvas size
-  };
-
-  // Gaussian-tapered component amplitudes; Σw = 1 so the slider value is the
-  // focused crest height of the whole group.
-  function buildTrain(amp, freq, speed, dirDeg, xOffset) {
-    const half = (N_COMP - 1) / 2;
-    const ws = [];
-    let sum = 0;
-    for (let j = 0; j < N_COMP; j++) {
-      const d = j - half;
-      const w = Math.exp(-(d * d) / (2 * 2.5 * 2.5));
-      ws.push(w); sum += w;
-    }
-    const comps = [];
-    for (let j = 0; j < N_COMP; j++) {
-      const f = freq * (1 + COMP_SPACING * (j - half));
-      comps.push({ a: amp * ws[j] / sum, k: (2 * Math.PI * f) / speed });
-    }
-    const th = dirDeg * Math.PI / 180;
-    return { comps, speed, xOffset, cos: Math.cos(th), sin: Math.sin(th) };
-  }
-
-  // η(x,y,t) for a train: all components share the train speed, so the group is
-  // a rigid profile in u = x·cosθ + y·sinθ − c·t; cos() puts the focused crest
-  // line exactly at u = 0.
-  function trainEta(train, x, y, t) {
-    const u = x * train.cos + y * train.sin - train.speed * t - train.xOffset;
-    let s = 0;
-    for (const c of train.comps) s += c.a * Math.cos(c.k * u);
-    return s;
-  }
-
-  function rebuild() {
-    const p = readParams();
-    state.trainA = buildTrain(p.aAmp, p.aFreq, p.aSpeed, p.aDir, WORLD_W * 0.3);
-    state.trainB = buildTrain(p.bAmp, p.bFreq, p.bSpeed, p.bDir, WORLD_W * 0.72);
-    let variance = 0;
-    for (const c of state.trainA.comps) variance += c.a * c.a / 2;
-    for (const c of state.trainB.comps) variance += c.a * c.a / 2;
-    state.Hs = 4 * Math.sqrt(variance);
-    $('v-hs').textContent = state.Hs.toFixed(2);
-  }
-
-  function readParams() {
-    const p = {};
-    for (const k in controls) p[k] = parseFloat(controls[k].value);
-    return p;
-  }
-
-  // ---------- rogue detection: zero-down-crossing wave heights ----------
-  // Returns { Hmax, iCrest } over one sampled profile.
-  function scanWaves(eta) {
-    let Hmax = 0, iCrest = 0;
-    let segMax = -Infinity, segMin = Infinity, segMaxI = 0;
-    for (let i = 0; i < eta.length; i++) {
-      const y = eta[i];
-      if (y > segMax) { segMax = y; segMaxI = i; }
-      if (y < segMin) segMin = y;
-      const down = i > 0 && eta[i - 1] >= 0 && y < 0;
-      if (down || i === eta.length - 1) {
-        const h = segMax - segMin;
-        if (h > Hmax) { Hmax = h; iCrest = segMaxI; }
-        segMax = y; segMin = y; segMaxI = i;
-      }
-    }
-    return { Hmax, iCrest };
-  }
-
-  // Scan several rows across the sea; return the tallest wave and its world position.
-  function detect(t, rows, nSamples) {
-    let best = { Hmax: 0, xM: 0, yM: 0, eta: 0 };
-    const eta = new Array(nSamples);
-    for (const yM of rows) {
-      for (let i = 0; i < nSamples; i++) {
-        const x = i / (nSamples - 1) * WORLD_W;
-        eta[i] = trainEta(state.trainA, x, yM, t) + trainEta(state.trainB, x, yM, t);
-      }
-      const { Hmax, iCrest } = scanWaves(eta);
-      if (Hmax > best.Hmax)
-        best = { Hmax, xM: iCrest / (nSamples - 1) * WORLD_W, yM, eta: eta[iCrest] };
-    }
-    return best;
-  }
-
-  // ---------- 2D rendering ----------
-  function resize() {
-    const rect = canvas.parentElement.getBoundingClientRect();
-    state.dpr = Math.min(window.devicePixelRatio || 1, 2);
-    state.W = rect.width; state.H = rect.height;
-    canvas.width = Math.round(rect.width * state.dpr);
-    canvas.height = Math.round(rect.height * state.dpr);
-    canvas3.width = canvas.width;
-    canvas3.height = canvas.height;
-    if (gl) gl.viewport(0, 0, canvas3.width, canvas3.height);
-  }
-  window.addEventListener('resize', resize);
-
-  function tracePath(samples, midY, scale, step) {
-    ctx.beginPath();
-    for (let i = 0; i < samples.length; i++) {
-      const px = i * step, py = midY - samples[i] * scale;
-      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-    }
-  }
-
-  function draw2d(t, wallNow) {
-    const { W, H, dpr } = state;
-    const step = 2;
-    const n = Math.max(2, Math.ceil(W / step) + 1);
-    const etaA = new Array(n), etaB = new Array(n), etaSum = new Array(n);
-    const mPerPx = WORLD_W / W;
-    for (let i = 0; i < n; i++) {
-      const x = i * step * mPerPx;
-      etaA[i] = trainEta(state.trainA, x, 0, t);
-      etaB[i] = trainEta(state.trainB, x, 0, t);
-      etaSum[i] = etaA[i] + etaB[i];
-    }
-
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, W, H);
-    const midY = H * 0.52;
-
-    const p = readParams();
-    const targetScale = (H * 0.36) / Math.max(2.5, (p.aAmp + p.bAmp) * 1.15);
-    state.yScale += (targetScale - state.yScale) * 0.06;
-    const sc = state.yScale;
-
-    // mean sea level + H_s guides
-    ctx.strokeStyle = '#1c3852'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(W, midY); ctx.stroke();
-    ctx.setLineDash([5, 6]);
-    ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
-    ctx.textBaseline = 'bottom';
-    for (const [mult, color, label] of [[0.5, '#2b5375', '±H_s/2'], [1, '#7c3a45', '±H_s  (2·H_s wave zone)']]) {
-      ctx.strokeStyle = color; ctx.fillStyle = color;
-      for (const sgn of [1, -1]) {
-        const y = midY - sgn * mult * state.Hs * sc;
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-      }
-      ctx.fillText(label, 8, midY - mult * state.Hs * sc - 3);
-    }
-    ctx.setLineDash([]);
-
-    // component trains
-    ctx.lineWidth = 1.4; ctx.globalAlpha = 0.6;
-    ctx.strokeStyle = '#38bdf8'; tracePath(etaA, midY, sc, step); ctx.stroke();
-    ctx.strokeStyle = '#a78bfa'; tracePath(etaB, midY, sc, step); ctx.stroke();
-    ctx.globalAlpha = 1;
-
-    // water body under the resultant
-    tracePath(etaSum, midY, sc, step);
-    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
-    const g = ctx.createLinearGradient(0, midY - 60, 0, H);
-    g.addColorStop(0, 'rgba(56,189,248,0.14)');
-    g.addColorStop(1, 'rgba(8,25,45,0.05)');
-    ctx.fillStyle = g; ctx.fill();
-
-    // resultant line — heats up as it approaches rogue territory
-    const ratio = state.Hs > 0 ? state.lastHmax / state.Hs : 0;
-    const hot = Math.min(Math.max((ratio - 1.2) / 0.8, 0), 1);
-    ctx.lineWidth = 2.4;
-    ctx.strokeStyle = hot > 0.75 ? '#f87171' : hot > 0.4 ? '#fbbf24' : '#f1f5f9';
-    ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 6 + hot * 14;
-    tracePath(etaSum, midY, sc, step); ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    // convergence marker for the most recent rogue event
-    const ev = state.lastEvent;
-    if (ev && wallNow - ev.wall < MARKER_MS) {
-      const age = (wallNow - ev.wall) / MARKER_MS;
-      const fade = 1 - age;
-      const x = ev.xM / WORLD_W * W, y = midY - ev.eta * sc;
-      ctx.save();
-      ctx.globalAlpha = fade;
-      ctx.strokeStyle = '#f87171'; ctx.setLineDash([4, 5]); ctx.lineWidth = 1.2;
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-      ctx.setLineDash([]);
-      const pulse = 10 + 26 * ((wallNow / 500) % 1);
-      ctx.beginPath(); ctx.arc(x, y, pulse, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(248,113,113,' + (0.8 * fade * (1 - (pulse - 10) / 26)) + ')';
-      ctx.lineWidth = 2; ctx.stroke();
-      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
-      ctx.fillStyle = '#fca5a5'; ctx.fill();
-      ctx.fillStyle = 'rgba(252,165,165,' + fade + ')';
-      ctx.font = '11px ui-sans-serif, system-ui, sans-serif';
-      ctx.textBaseline = 'alphabetic';
-      ctx.fillText('convergence: ' + ev.ratio.toFixed(2) + '×H_s', Math.min(x + 10, W - 130), Math.max(y - 12, 14));
-      ctx.restore();
-    }
-  }
-
-  // ---------- 3D rendering (hand-rolled WebGL, wave sum in the vertex shader) ----------
-  let gl = null, glOk = false, prog = null, uni = {}, nIndices = 0;
-  const cam = { yaw: 0.55, pitch: 0.62, dist: 640, zScale: 12 };
-
-  const VSH = `
-attribute vec2 aPos;
-uniform float uT, uZ;
-uniform float uAa[7]; uniform float uAk[7];
-uniform float uBa[7]; uniform float uBk[7];
-uniform vec4 uAtr, uBtr;          // cosθ, sinθ, speed, xOffset
-uniform mat4 uMVP;
-varying float vEta; varying vec3 vN; varying vec3 vPos;
-void main() {
-  float ua = aPos.x*uAtr.x + aPos.y*uAtr.y - uAtr.z*uT - uAtr.w;
-  float ub = aPos.x*uBtr.x + aPos.y*uBtr.y - uBtr.z*uT - uBtr.w;
-  float h = 0.0, da = 0.0, db = 0.0;
-  for (int i = 0; i < 7; i++) {
-    h  += uAa[i]*cos(uAk[i]*ua) + uBa[i]*cos(uBk[i]*ub);
-    da -= uAa[i]*uAk[i]*sin(uAk[i]*ua);
-    db -= uBa[i]*uBk[i]*sin(uBk[i]*ub);
-  }
-  float dx = da*uAtr.x + db*uBtr.x;
-  float dy = da*uAtr.y + db*uBtr.y;
-  vN = normalize(vec3(-dx*uZ, -dy*uZ, 1.0));
-  vEta = h;
-  vPos = vec3(aPos, h*uZ);
-  gl_Position = uMVP * vec4(vPos, 1.0);
-}`;
-  const FSH = `
-precision mediump float;
-varying float vEta; varying vec3 vN; varying vec3 vPos;
-uniform float uHs; uniform vec3 uEye;
-void main() {
-  vec3 N = normalize(vN);
-  vec3 L = normalize(vec3(0.35, 0.3, 0.85));
-  vec3 V = normalize(uEye - vPos);
-  float diff = max(dot(N, L), 0.0);
-  float spec = pow(max(dot(N, normalize(L + V)), 0.0), 60.0) * 0.45;
-  float fres = pow(1.0 - max(dot(N, V), 0.0), 3.0);
-  float t = clamp(vEta / (uHs * 1.2) * 0.5 + 0.5, 0.0, 1.0);
-  vec3 col = mix(vec3(0.016, 0.09, 0.18), vec3(0.30, 0.62, 0.85), t);
-  float rz = smoothstep(uHs * 0.85, uHs * 1.05, vEta);   // crest entering rogue zone
-  col = mix(col, vec3(0.97, 0.55, 0.35), rz * 0.85);
-  col = col * (0.35 + 0.75 * diff) + vec3(spec) + fres * vec3(0.06, 0.12, 0.18);
-  gl_FragColor = vec4(col, 1.0);
-}`;
-
-  // minimal mat4 helpers (column-major)
-  function matPerspective(fov, aspect, near, far) {
-    const f = 1 / Math.tan(fov / 2), nf = 1 / (near - far);
-    return [f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0];
-  }
-  function matLookAt(eye, c, up) {
-    let zx = eye[0] - c[0], zy = eye[1] - c[1], zz = eye[2] - c[2];
-    let l = Math.hypot(zx, zy, zz); zx /= l; zy /= l; zz /= l;
-    let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
-    l = Math.hypot(xx, xy, xz); xx /= l; xy /= l; xz /= l;
-    const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
-    return [xx, yx, zx, 0, xy, yy, zy, 0, xz, yz, zz, 0,
-      -(xx * eye[0] + xy * eye[1] + xz * eye[2]),
-      -(yx * eye[0] + yy * eye[1] + yz * eye[2]),
-      -(zx * eye[0] + zy * eye[1] + zz * eye[2]), 1];
-  }
-  function matMul(a, b) {
-    const o = new Array(16);
-    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
-      o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
-    }
-    return o;
-  }
-
-  function initGL() {
-    if (gl) return glOk;
-    gl = canvas3.getContext('webgl', { antialias: true });
-    if (!gl) { glOk = false; return false; }
-    function sh(type, src) {
-      const s = gl.createShader(type);
-      gl.shaderSource(s, src); gl.compileShader(s);
-      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
-      return s;
-    }
-    try {
-      prog = gl.createProgram();
-      gl.attachShader(prog, sh(gl.VERTEX_SHADER, VSH));
-      gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FSH));
-      gl.linkProgram(prog);
-      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
-    } catch (e) {
-      console.warn('WebGL init failed:', e.message);
-      glOk = false; return false;
-    }
-    gl.useProgram(prog);
-    for (const n of ['uT', 'uZ', 'uAa', 'uAk', 'uBa', 'uBk', 'uAtr', 'uBtr', 'uMVP', 'uHs', 'uEye'])
-      uni[n] = gl.getUniformLocation(prog, n);
-
-    // grid mesh over [0,WORLD_W] × [-WORLD_D/2, WORLD_D/2]
-    const NX = 181, NY = 101;
-    const verts = new Float32Array(NX * NY * 2);
-    let vi = 0;
-    for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
-      verts[vi++] = i / (NX - 1) * WORLD_W;
-      verts[vi++] = (j / (NY - 1) - 0.5) * WORLD_D;
-    }
-    const idx = new Uint16Array((NX - 1) * (NY - 1) * 6);
-    let ii = 0;
-    for (let j = 0; j < NY - 1; j++) for (let i = 0; i < NX - 1; i++) {
-      const a = j * NX + i, b = a + 1, c = a + NX, d = c + 1;
-      idx[ii++] = a; idx[ii++] = c; idx[ii++] = b;
-      idx[ii++] = b; idx[ii++] = c; idx[ii++] = d;
-    }
-    nIndices = idx.length;
-    const vbo = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
-    const loc = gl.getAttribLocation(prog, 'aPos');
-    gl.enableVertexAttribArray(loc);
-    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-    const ibo = gl.createBuffer();
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
-    gl.enable(gl.DEPTH_TEST);
-    gl.clearColor(0.012, 0.04, 0.08, 1);
-    gl.viewport(0, 0, canvas3.width, canvas3.height);
-    glOk = true;
-    return true;
-  }
-
-  let lastMVP = null;
-  function draw3d(t, wallNow) {
-    const p = readParams();
-    const targetZ = 55 / Math.max(2.5, p.aAmp + p.bAmp);
-    cam.zScale += (targetZ - cam.zScale) * 0.06;
-
-    const center = [WORLD_W / 2, 0, 0];
-    const eye = [
-      center[0] + cam.dist * Math.cos(cam.pitch) * Math.sin(cam.yaw),
-      center[1] - cam.dist * Math.cos(cam.pitch) * Math.cos(cam.yaw),
-      center[2] + cam.dist * Math.sin(cam.pitch),
-    ];
-    const proj = matPerspective(0.9, canvas3.width / canvas3.height, 10, 4000);
-    const mvp = matMul(proj, matLookAt(eye, center, [0, 0, 1]));
-    lastMVP = mvp;
-
-    const A = state.trainA, B = state.trainB;
-    gl.uniform1f(uni.uT, t);
-    gl.uniform1f(uni.uZ, cam.zScale);
-    gl.uniform1f(uni.uHs, state.Hs);
-    gl.uniform3f(uni.uEye, eye[0], eye[1], eye[2]);
-    gl.uniform1fv(uni.uAa, A.comps.map(c => c.a));
-    gl.uniform1fv(uni.uAk, A.comps.map(c => c.k));
-    gl.uniform1fv(uni.uBa, B.comps.map(c => c.a));
-    gl.uniform1fv(uni.uBk, B.comps.map(c => c.k));
-    gl.uniform4f(uni.uAtr, A.cos, A.sin, A.speed, A.xOffset);
-    gl.uniform4f(uni.uBtr, B.cos, B.sin, B.speed, B.xOffset);
-    gl.uniformMatrix4fv(uni.uMVP, false, mvp);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    gl.drawElements(gl.TRIANGLES, nIndices, gl.UNSIGNED_SHORT, 0);
-
-    updateBeacon(wallNow);
-  }
-
-  // DOM beacon at the projected convergence point
-  function updateBeacon(wallNow) {
-    const ev = state.lastEvent, el = $('beacon');
-    if (state.mode !== 'surf' || !ev || wallNow - ev.wall > MARKER_MS || !lastMVP) {
-      el.classList.add('hidden'); return;
-    }
-    const m = lastMVP;
-    const px = ev.xM, py = ev.yM, pz = ev.eta * cam.zScale;
-    const cx = m[0] * px + m[4] * py + m[8] * pz + m[12];
-    const cy = m[1] * px + m[5] * py + m[9] * pz + m[13];
-    const cw = m[3] * px + m[7] * py + m[11] * pz + m[15];
-    if (cw <= 0) { el.classList.add('hidden'); return; }
-    el.classList.remove('hidden');
-    el.style.left = ((cx / cw * 0.5 + 0.5) * state.W) + 'px';
-    el.style.top = ((-cy / cw * 0.5 + 0.5) * state.H) + 'px';
-    el.style.opacity = String(1 - (wallNow - ev.wall) / MARKER_MS);
-  }
-
-  // drag to rotate
-  let dragging = false, lastPX = 0, lastPY = 0;
-  canvas3.addEventListener('pointerdown', e => {
-    dragging = true; lastPX = e.clientX; lastPY = e.clientY;
-    canvas3.setPointerCapture(e.pointerId);
-  });
-  canvas3.addEventListener('pointermove', e => {
-    if (!dragging) return;
-    cam.yaw += (e.clientX - lastPX) * 0.005;
-    cam.pitch = Math.min(1.35, Math.max(0.15, cam.pitch + (e.clientY - lastPY) * 0.005));
-    lastPX = e.clientX; lastPY = e.clientY;
-  });
-  canvas3.addEventListener('pointerup', () => { dragging = false; });
-
-  // ---------- view mode ----------
-  function setMode(mode) {
-    if (mode === 'surf' && !initGL()) {
-      $('btn-3d').disabled = true;
-      $('btn-3d').title = 'WebGL unavailable in this browser';
-      mode = 'flat';
-    }
-    state.mode = mode;
-    const surf = mode === 'surf';
-    canvas.classList.toggle('hidden', surf);
-    canvas3.classList.toggle('hidden', !surf);
-    $('legend-2d').classList.toggle('hidden', surf);
-    $('legend-3d').classList.toggle('hidden', !surf);
-    $('hint3d').classList.toggle('hidden', !surf);
-    $('btn-2d').setAttribute('aria-pressed', String(!surf));
-    $('btn-3d').setAttribute('aria-pressed', String(surf));
-    if (!surf) $('beacon').classList.add('hidden');
-  }
-  $('btn-2d').addEventListener('click', () => setMode('flat'));
-  $('btn-3d').addEventListener('click', () => setMode('surf'));
-
-  // ---------- HUD / alert ----------
-  function updateHud(Hmax) {
-    const ratio = state.Hs > 0 ? Hmax / state.Hs : 0;
-    $('v-hmax').textContent = Hmax.toFixed(2);
-    $('v-ratio').textContent = ratio.toFixed(2);
-    const fill = $('meter-fill');
-    fill.style.width = Math.min(ratio / 2.5, 1) * 100 + '%';
-    fill.style.background = ratio >= 2 ? 'var(--danger)' : ratio >= 1.6 ? 'var(--warn)' : 'var(--accent)';
-    const tile = $('stat-ratio');
-    tile.classList.toggle('rogue', ratio >= 2);
-    tile.classList.toggle('hot', ratio >= 1.6 && ratio < 2);
-  }
-
-  function triggerRogue(best, ratio, wallNow) {
-    state.rogueCount++;
-    $('v-count').textContent = state.rogueCount;
-    state.lastEvent = { xM: best.xM, yM: best.yM, eta: best.eta, ratio, wall: wallNow };
-    state.cooldownUntil = wallNow + COOLDOWN_MS;
-    if ($('g-freeze').checked) state.freezeUntil = wallNow + FREEZE_MS;
-    $('alert-sub').textContent =
-      'H = ' + (ratio * state.Hs).toFixed(1) + ' m  ·  ' + ratio.toFixed(2) + ' × H_s  ·  x ≈ ' +
-      Math.round(best.xM) + ' m';
-    const overlay = $('alert');
-    overlay.classList.remove('show');
-    void overlay.offsetWidth;            // restart the flash animation
-    overlay.classList.add('show');
-    clearTimeout(triggerRogue._t);
-    triggerRogue._t = setTimeout(() => overlay.classList.remove('show'), 2600);
-  }
-
-  // ---------- reactive educational tip ----------
-  function updateTip(ratio) {
-    const p = readParams();
-    const tip = $('tip');
-    let html;
-    if (Math.abs(p.aFreq - p.bFreq) < 0.015)
-      html = '<b>Beat pattern:</b> the two frequencies are nearly equal, so you get slow beats — broad zones of reinforcement and cancellation — rather than sharp focusing events.';
-    else if (Math.abs(p.aSpeed - p.bSpeed) < 0.6)
-      html = '<b>No lapping:</b> the trains travel at almost the same speed, so their groups barely drift past each other. Increase the speed difference to make convergence events more frequent.';
-    else if (Math.max(p.aAmp, p.bAmp) / Math.min(p.aAmp, p.bAmp) > 3)
-      html = '<b>One-sided sea:</b> one train dominates. Interference is strongest — and rogues most likely — when the two amplitudes are comparable.';
-    else if (ratio >= 2)
-      html = '<b>Rogue conditions:</b> the tallest wave now exceeds 2·H<sub>s</sub>. In a real sea this crest would appear "out of nowhere" and vanish within a minute.';
-    else if (ratio >= 1.7)
-      html = '<b>Close!</b> H<sub>max</sub> is nearing the 2·H<sub>s</sub> threshold — the wave groups are partially aligned. Watch the convergence region.';
-    else if (state.mode === 'surf' && Math.abs(p.aDir - p.bDir) >= 20)
-      html = '<b>Crossing seas:</b> the trains travel ' + Math.abs(p.aDir - p.bDir).toFixed(0) +
-        '° apart, so their crest lines only fully reinforce where they intersect — watch that moving intersection point. This is the leading explanation for the Draupner rogue wave.';
-    else
-      html = '<b>Tip:</b> in 2D, the white line is the literal sum of the blue and violet lines at every point. In 3D, crests glowing orange have climbed above H<sub>s</sub> — rogue territory.';
-    if (tip.dataset.html !== html) { tip.dataset.html = html; tip.innerHTML = html; }
-  }
-
-  // ---------- main loop ----------
-  let lastWall = performance.now();
-  let tipTimer = 0;
-
-  function frame(wallNow) {
-    const dt = Math.min((wallNow - lastWall) / 1000, 0.05);
-    lastWall = wallNow;
-
-    const frozen = wallNow < state.freezeUntil;
-    $('frozen-note').classList.toggle('show', frozen);
-    if (state.running && !frozen) state.simTime += dt * parseFloat(controls.timeScale.value);
-
-    if (state.W === 0) resize();
-    const t = state.simTime;
-
-    // detection: centre slice in 2D; three rows across the sea in 3D
-    const rows = state.mode === 'surf' ? [-WORLD_D / 3, 0, WORLD_D / 3] : [0];
-    const best = detect(t, rows, 360);
-    state.lastHmax = best.Hmax;
-    const ratio = state.Hs > 0 ? best.Hmax / state.Hs : 0;
-    if (ratio >= ROGUE_RATIO && wallNow > state.cooldownUntil && state.running)
-      triggerRogue(best, ratio, wallNow);
-
-    if (state.mode === 'surf' && glOk) draw3d(t, wallNow);
-    else draw2d(t, wallNow);
-
-    updateHud(best.Hmax);
-    if (wallNow - tipTimer > 500) { tipTimer = wallNow; updateTip(ratio); }
-
-    requestAnimationFrame(frame);
-  }
-
-  // ---------- wiring ----------
-  function syncOutputs() {
-    for (const k in controls) outputs[k].textContent = fmt[k](parseFloat(controls[k].value));
-  }
-  for (const k in controls) controls[k].addEventListener('input', () => { syncOutputs(); rebuild(); });
-
-  $('btn-pause').addEventListener('click', () => {
-    state.running = !state.running;
-    const b = $('btn-pause');
-    b.setAttribute('aria-pressed', String(!state.running));
-    b.textContent = state.running ? '⏸ Pause' : '▶ Resume';
-  });
-  document.addEventListener('keydown', e => {
-    if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') {
-      e.preventDefault(); $('btn-pause').click();
-    }
-  });
-  $('btn-reset').addEventListener('click', () => {
-    for (const k in DEFAULTS) controls[k].value = DEFAULTS[k];
-    state.simTime = 0; state.rogueCount = 0; state.lastEvent = null;
-    state.cooldownUntil = 0; state.freezeUntil = 0;
-    $('v-count').textContent = '0';
-    syncOutputs(); rebuild();
-  });
-
-  const sidebar = $('sidebar'), btnSidebar = $('btn-sidebar');
-  function setSidebar(open) {
-    sidebar.classList.toggle('hidden', !open);
-    btnSidebar.setAttribute('aria-pressed', String(open));
-  }
-  btnSidebar.addEventListener('click', () => setSidebar(sidebar.classList.contains('hidden')));
-  $('btn-close-sidebar').addEventListener('click', () => setSidebar(false));
-  if (window.innerWidth < 980) setSidebar(false);   // start closed on small screens
-
-  // expose a handle for automated testing
-  window.__sim = { state, scanWaves, trainEta, readParams, detect, setMode, isGlOk: () => glOk };
-
-  syncOutputs(); rebuild(); resize();
-  setMode('surf');                                   // 3D by default; falls back to 2D without WebGL
-  requestAnimationFrame(frame);
-})();
-</script>
+<script type="module" src="js/main.js"></script>
 </body>
 </html>

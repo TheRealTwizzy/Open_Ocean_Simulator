@@ -1,54 +1,73 @@
 # Open Ocean Simulator — Rogue Wave Lab
 
-An interactive, single-file simulation of deep-ocean rogue wave formation through
-**constructive interference** (linear focusing). Open `index.html` in any modern
-browser — no build step, no network, no dependencies.
+An immersive, browser-based open ocean where crossing wave trains and a wind sea
+pile up into rogue waves through **constructive interference** (dispersive
+focusing). Live at <https://therealtwizzy.github.io/Open_Ocean_Simulator/>.
 
-Two views, toggleable in the header: a **3D ocean surface** (hand-rolled WebGL,
-wave sum evaluated in the vertex shader; drag to rotate) and the original
-**2D cross-section**, where the resulting sea state is visibly the sum of the
-two train lines.
+The ocean is rendered with [Three.js](https://threejs.org/) (vendored, no CDN,
+no build step): the full wave sum runs in the vertex shader, with Gerstner chop,
+analytic normals, sky reflection, sun glint, subsurface glow and foam. Serve the
+folder over HTTP (`python3 -m http.server`) — ES modules do not load from
+`file://`.
 
-## What it shows
+## What you can do
 
-Two storm wave trains (A and B) cross the same stretch of ocean at different
-speeds and frequencies. The white "Resulting Sea State" line is their literal
-sum at every point — the principle of superposition. When the trains' wave
-groups drift into phase alignment, the surface briefly piles up into a single
-towering crest: a rogue wave.
+- **Add, remove, mute and shape wave trains** (1–6). Each has amplitude, peak
+  frequency, heading, bandwidth (±10–50 %), directional spread (0–40°) and, when
+  dispersion is off, its own phase speed.
+- **Set the wind.** A JONSWAP wind sea (0–15 m/s, 60 km fetch, Gaussian
+  directional spread) runs underneath the trains and counts toward H<sub>s</sub>.
+- **Toggle deep-water dispersion** (ω² = g·k, on by default). Speed sliders then
+  show the computed c = g/2πf and lock; groups focus and disperse for real.
+- **Interact with the water.** Drag to orbit, scroll or pinch to zoom, pick the
+  Orbit or Surface camera. Click the sea to drop a splash ripple, or switch the
+  click mode to Buoy and moor a marker that streams its elevation to a 12 s
+  sparkline.
+- **Watch the 2D superposition** drawer: every train's profile along the centre
+  line, the wind sea, and their white sum with the ±H<sub>s</sub> guides.
+- **Read the physics** in the explainer panel, with a tip that reacts to your
+  settings.
+
+Controls live in a dock of circular buttons along the bottom: pause, wave
+trains, settings, click mode, camera, physics, 2D view. Space pauses; Esc
+closes any panel.
 
 ## The physics
 
-- Each train is a **narrow-band group of 7 sinusoidal components** with
-  Gaussian-tapered amplitudes around the central frequency you set. This is the
-  honest model of a storm swell — and a mathematical necessity: two pure sine
-  waves can *never* exceed the rogue threshold (by Cauchy–Schwarz,
-  H/H<sub>s</sub> ≤ 1 for a two-component sea).
-- **Significant wave height** is computed live and analytically:
-  H<sub>s</sub> = 4σ with σ² = Σ aᵢ²/2 over all 14 components.
-- **Rogue detection** uses the standard oceanographic definition: the profile is
-  segmented at zero down-crossings each frame, and an alert fires when any
-  individual wave's crest-to-trough height exceeds 2·H<sub>s</sub>. The
-  convergence point is highlighted, and the simulation can auto-freeze briefly
-  so you can inspect it.
+- Every component, from the trains and the wind sea alike, is
+  η = a·cos(k(x cos θ + y sin θ) − ωt + φ). The surface is their sum.
+- A **train** is a group of 7 components with Gaussian-tapered amplitudes
+  (Σw = 1, so the amplitude slider is the crest height of the fully focused
+  group), evenly spaced over ±bandwidth around the peak frequency, with phases
+  set so they align at a focus point — the wave-tank recipe for a rogue. With
+  dispersion each component travels at its own speed, so the group flattens
+  out and, every 1/Δf seconds, refocuses.
+- **Significant wave height** H<sub>s</sub> = 4σ with σ² = Σaᵢ²/2 over all
+  components, updated live and identical across render-quality presets.
+- **Rogue detection** samples the central 600 × 320 m on an 8 m grid 30 times a
+  second and runs a zero-down-crossing scan along every row and column. A wave
+  whose crest-to-trough height exceeds 2·H<sub>s</sub> fires the alert, drops
+  a beacon on the crest, and briefly freezes the simulation (optional).
+- Crest steepness (Gerstner displacement), foam and splash ripples are visual
+  only and never enter H<sub>s</sub> or the detector.
 
-Each train also has a **direction (heading)** slider. Pointing the trains along
-different headings creates **crossing seas** — two wave systems whose crest
-lines only fully reinforce where they intersect. Crossing wind-sea and swell is
-a documented real-world rogue mechanism and the leading hypothesis for the
-Draupner wave; in the 3D view, crests climbing above the H<sub>s</sub>
-elevation glow orange, and rogue events drop a pulsing beacon at the
-convergence point.
+At the default settings (two trains at 0.15 Hz / 0.11 Hz crossing at 30°,
+bandwidth 20 %, spread 10°, 8 m/s wind) the two groups' refocus periods of
+100 s and 136 s beat against each other, so rogue events arrive in irregular
+bursts every minute or two at 2.5× time. Widen the bandwidth or the spread, or
+raise the wind, and they become rarer — like the real ocean.
 
-## Controls
+## Layout
 
-- Per-train sliders: amplitude, central frequency, propagation speed, direction.
-- Global time step / speed multiplier (0–8×), pause (space bar), reset.
-- Toggleable physics sidebar with a reactive tip that responds to your slider
-  settings (beats, non-lapping groups, near-rogue conditions, …).
+```
+index.html          HUD markup, import map, physics explainer
+css/style.css       deep-sea styling (glass panels, dock, popovers, sliders)
+js/physics.js       trains, JONSWAP ambient, Gerstner surface, detector (pure JS)
+js/ocean.js         Three.js scene: ocean shader, sky, camera, buoy, picking
+js/ui.js            dock, popovers, train cards, stats, alert, 2D drawer
+js/main.js          state, frame loop, detection, interaction, quality
+vendor/             three.module.min.js, OrbitControls.js, Sky.js (r170)
+```
 
-## Rogue hunting recipe
-
-Keep the two amplitudes similar, keep a healthy speed difference between the
-trains, and watch the H<sub>max</sub>/H<sub>s</sub> meter approach the red tick
-at 2.0. At the default settings an event lands roughly every half minute.
+Render quality is auto-picked (`?q=low|med|high` overrides it) and steps down
+once if the GPU cannot hold ~25 fps. Everything works offline once loaded.
