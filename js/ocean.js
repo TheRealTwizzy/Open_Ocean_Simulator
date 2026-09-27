@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/OrbitControls.js';
 import { Sky } from '../vendor/Sky.js';
-import { TEX_W, RIPPLE, QUALITY, rippleEta } from './physics.js';
+import { TEX_W, TWO_PI, DETAIL_N, RIPPLE, QUALITY, rippleEta } from './physics.js';
 
 export const PLANE = 3600;           // side of the displaced mesh, metres (stretched grid)
 const GRID_LINEAR = 0.28;            // share of linear spacing in the stretch: centre ≈ 0.28·PLANE/segments
@@ -32,6 +32,7 @@ varying vec3 vNormal;
 varying float vH;
 varying float vJ;
 varying float vRip;
+varying vec2 vSlope;
 
 void main() {
   float x = position.x, y = position.z;
@@ -88,6 +89,7 @@ void main() {
   vJ = (1.0 - Sxx) * (1.0 - Syy) - Sxy * Sxy;
   vH = h;
   vRip = rip;
+  vSlope = vec2(Shx, Shy);
   vec3 wp = vec3(x + disp.x, h, y + disp.y);
   vWorld = wp;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(wp, 1.0);
@@ -108,11 +110,16 @@ uniform float uTime;
 uniform float uFogNear;
 uniform float uFogFar;
 uniform float uRim;
+uniform vec4 uDetail[${DETAIL_N}];   // short waves: k·dir (x, z), phase at uTime, a·k
+uniform int uDetailCount;
+uniform float uWhitecap;
+uniform float uPixelAngle;          // radians per drawing-buffer pixel
 varying vec3 vWorld;
 varying vec3 vNormal;
 varying float vH;
 varying float vJ;
 varying float vRip;
+varying vec2 vSlope;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p) {
@@ -131,26 +138,34 @@ void main() {
   vec3 toCam = cameraPosition - vWorld;
   float dist = length(toCam);
   vec3 V = toCam / max(dist, 1e-3);
-  // fine ripple detail the mesh cannot carry, fading with distance. SKIP_ZERO (off with
-  // ?noskip) branches around zero-weight noise, which only saves work on GPUs that skip a
-  // branch all lanes agree on (SwiftShader masks both sides: ~5-15% slower). FLAT keeps
-  // these two unbranched, as its discarded lanes still feed textureCube's derivatives.
-  vec2 dn = vec2(0.0);
+  // short wind waves the mesh cannot carry (buildDetailWaves), as normals only.
+  // Each fades as its phase changes by more than ~1 rad across a pixel's
+  // footprint on the sea: dist·uPixelAngle across the view, stretched by
+  // 1/sin(elevation) along it, so grazing views keep the waves they can resolve.
+  // (Analytic rather than dFdx: next to FLAT's discard derivatives are undefined
+  // and SwiftShader returns run-to-run noise.) The slope variance of faded waves,
+  // lostVar, widens the sun's lobe instead. SKIP_ZERO (off with ?noskip) skips
+  // the sine of faded ones, which only saves work on GPUs that skip a branch all
+  // lanes agree on; FLAT keeps it, as a branch by its discard upsets the
+  // derivatives textureCube takes.
+  vec2 gradD = vec2(0.0);
+  float lostVar = 0.0;
+  vec2 along = normalize(-V.xz + vec2(1e-6, 0.0)), across = vec2(-along.y, along.x);
+  float foot = dist * uPixelAngle;
+  vec2 dX = along * foot / max(V.y, 0.02), dY = across * foot;
+  for (int i = 0; i < ${DETAIL_N}; i++) {
+    if (i >= uDetailCount) break;
+    vec4 w = uDetail[i];
+    float f = 1.0 - smoothstep(0.8, 2.4, abs(dot(w.xy, dX)) + abs(dot(w.xy, dY)));
+    lostVar += 0.5 * w.w * w.w * (1.0 - f);
+    float s = 0.0;
 #if defined(SKIP_ZERO) && !defined(FLAT)
-  if (dist < 420.0)
+    if (f > 0.0)
 #endif
-  {
-    float detail = (1.0 - smoothstep(40.0, 420.0, dist)) * 0.22;
-    dn = vec2(fbm(vWorld.xz * 0.14 + uTime * 0.05) - 0.5, fbm(vWorld.zx * 0.14 - uTime * 0.04) - 0.5) * detail;
+    s = sin(dot(w.xy, vWorld.xz) + w.z);
+    gradD -= w.w * f * s * normalize(w.xy);
   }
-#if defined(SKIP_ZERO) && !defined(FLAT)
-  if (dist < 140.0)
-#endif
-  {
-    float fine = (1.0 - smoothstep(10.0, 140.0, dist)) * 0.14;
-    dn += vec2(fbm(vWorld.xz * 0.6 + uTime * 0.13) - 0.5, fbm(vWorld.zx * 0.6 - uTime * 0.1) - 0.5) * fine;
-  }
-  N = normalize(N + vec3(dn.x, 0.0, dn.y));
+  N = normalize(N - vec3(gradD.x, 0.0, gradD.y));
 
   float NdV = clamp(dot(N, V), 0.0, 1.0);
   float fres = 0.02 + 0.98 * pow(1.0 - NdV, 5.0);
@@ -159,31 +174,37 @@ void main() {
   vec3 sky = textureCube(uSky, R).rgb;
 
   float RdL = max(dot(R, uSunDir), 0.0);
-  float glint = pow(RdL, 1400.0) * 14.0 + pow(RdL, 120.0) * 0.5;
-  float sparkle = 1.0;
-#ifdef SKIP_ZERO
-  if (dist < 900.0)
-#endif
-  sparkle = mix(1.0, 0.4 + 1.2 * fbm(vWorld.xz * 0.3 + uTime * 0.09), 1.0 - smoothstep(150.0, 900.0, dist));
-  glint *= sparkle;
+  // a normalised lobe: slope variance too fine for the pixel widens it, so the sun
+  // breaks into glints up close and spreads into a glitter path far out
+  float spec = 2.0 / (0.0014 + lostVar) - 2.0;
+  float glint = pow(RdL, spec) * 14.0 * (spec + 2.0) / 1430.0;
 
   float hN = vH / max(uHs, 0.2);
   float NdL = max(dot(N, uSunDir), 0.0);
-  vec3 body = mix(uDeep, uShallow, clamp(hN * 0.3 + 0.35, 0.0, 1.0)) * (0.5 + 0.7 * NdL);
+  // the body colour is light scattered up from inside the water, not a lit surface: no N·L
+  vec3 body = mix(uDeep, uShallow, clamp(hN * 0.3 + 0.35, 0.0, 1.0)) * 0.75;
   float back = pow(max(dot(V, -uSunDir), 0.0), 3.0);
   float sss = back * clamp(hN * 0.9 + 0.15, 0.0, 1.6) * pow(1.0 - NdV, 1.2);
   vec3 col = mix(body, sky, fres) + sss * uSSS + glint * uSunColor * (0.3 + 0.7 * fres);
 
   float fold = clamp(1.0 - vJ, 0.0, 1.0);
   float foamDrive = smoothstep(uFoamJ.x, uFoamJ.y, fold) + smoothstep(1.0, 1.5, hN) * 0.7 + vRip * 0.8;
-  // foamDrive is 0 on the whole flat far plane (vJ = 1, vH = 0, vRip = 0)
+  float foam = 0.0;
+#ifndef FLAT
+  // foamDrive is 0 on the whole flat far plane (vJ = 1, vH = 0, vRip = 0): no fold foam there
   float n1 = 0.0;
 #ifdef SKIP_ZERO
   if (foamDrive > 0.0)
 #endif
   n1 = fbm(vWorld.xz * 0.11 + vec2(uTime * 0.025, 0.0));
-  float foam = clamp(foamDrive * smoothstep(0.32, 0.72, n1) * 1.5, 0.0, 1.0);
-  col = mix(col, vec3(0.86, 0.92, 0.97) * (0.55 + 0.55 * NdL), foam);
+  foam = clamp(foamDrive * smoothstep(0.32, 0.72, n1) * 1.5, 0.0, 1.0);
+#endif
+  // whitecaps: short wind waves break where the local slope (mesh waves plus the
+  // resolved detail) passes ~0.3, the linear breaking onset; near the camera that
+  // covers ~0.4 % of the sea at 8 m/s and ~4 % at 15, as whitecap surveys find
+  foam = max(foam, uWhitecap * smoothstep(0.3, 0.42, length(gradD - vSlope)));
+  // foam is a bright diffuse scatterer, lit by the whole sky as well as the low sun
+  col = mix(col, vec3(0.86, 0.92, 0.97) * (0.68 + 0.5 * NdL), foam);
 
   float rz = smoothstep(0.65, 1.0, hN) * uRogueTint;
   col = mix(col, col * vec3(2.4, 0.95, 0.55) + vec3(0.32, 0.09, 0.02), rz * 0.65);
@@ -246,6 +267,7 @@ export class Ocean {
     this.transition = null;
     this._tmpV = new THREE.Vector3();
     this._tmpQ = new THREE.Quaternion();
+    this._tmpV2 = new THREE.Vector2();
     this._pt = {};
 
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -329,6 +351,10 @@ export class Ocean {
       uRogueTint: { value: 1 },
       uFogNear: { value: 600 },
       uFogFar: { value: 4200 },
+      uDetail: { value: Array.from({ length: DETAIL_N }, () => new THREE.Vector4()) },
+      uDetailCount: { value: 0 },
+      uWhitecap: { value: 1 },
+      uPixelAngle: { value: 0.001 },
     };
     const defines = skipZero ? { SKIP_ZERO: 1 } : {};
     const material = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: WAVE_VERT, fragmentShader: WAVE_FRAG, defines });
@@ -434,6 +460,9 @@ export class Ocean {
     sea.packStatic(this.texData);
     this.uniforms.uCount.value = sea.n;
     this.uniforms.uHs.value = sea.Hs;
+    const detail = sea.detail.comps;
+    detail.forEach((c, i) => this.uniforms.uDetail.value[i].set(c.k * c.dx, c.k * c.dy, 0, c.ak));
+    this.uniforms.uDetailCount.value = detail.length;
     // smoothstep is undefined when its edges coincide, so keep them apart at steepness 0
     this.uniforms.uFoamJ.value.set(Math.max(0.72 * sea.steepness, 0.02), Math.max(sea.steepness, 0.05));
     this.compTex.needsUpdate = true;
@@ -447,6 +476,7 @@ export class Ocean {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this.uniforms.uPixelAngle.value = 2 * Math.tan(this.camera.fov * Math.PI / 360) / this.renderer.getDrawingBufferSize(this._tmpV2).y;
   }
 
   setPreset(name, animate = true) {
@@ -528,6 +558,12 @@ export class Ocean {
     sea.packPhases(this.texData, simTime);
     this.compTex.needsUpdate = true;
     u.uTime.value = simTime;
+    // detail phases wrapped on the CPU, as for the mesh, so float32 never holds ω·t
+    const detail = sea.detail.comps;
+    for (let i = 0; i < detail.length; i++) {
+      const ph = (detail[i].phi - detail[i].w * simTime) % TWO_PI;
+      u.uDetail.value[i].z = ph < 0 ? ph + TWO_PI : ph;
+    }
 
     this.ripples = this.ripples.filter(r => simTime - r.t0 <= RIPPLE.LIFE && simTime >= r.t0);
     for (let i = 0; i < RIPPLE.MAX; i++) {

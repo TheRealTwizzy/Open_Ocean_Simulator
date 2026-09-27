@@ -1,6 +1,7 @@
 // The measuring aids for the shader's zero-weight skips: ?noskip must render
-// exactly the image the default shader renders (the skips only drop work whose
-// result is multiplied by zero), and ?fps must show the frame time, the
+// the image the default shader renders, up to SwiftShader's own noise (the
+// skips only drop work whose result is multiplied by zero), and ?fps must show
+// the frame time, the
 // quality and whether the skips are on, keeping GPU timer queries until they
 // report however many frames that takes.
 // Run: npm run test:browser
@@ -73,7 +74,12 @@ test('?noskip renders the same image as the default shader, in orbit, surface an
         if (pa[i] > 8) lit++;
       }
       assert.ok(lit > pa.length / 8, `${view.name}: the frame is actually drawn (${lit} lit channels)`);
-      assert.ok(maxDiff <= 1 && over1 === 0, `${view.name}: max channel diff ${maxDiff}, ${over1} channels off by more than 1`);
+      // SwiftShader itself is not bit-stable near the horizon with the short-wave
+      // shader: one page rendering a pinned frame twice, or re-baking its sky, moves
+      // up to ~50 channels by up to 4 levels. A skip that changes the image moves
+      // thousands (skipping the sine while f < 0.5 instead of f = 0: 65 486)
+      assert.ok(maxDiff <= 6 && over1 <= pa.length * 0.0005,
+        `${view.name}: max channel diff ${maxDiff}, ${over1} channels off by more than 1 (noise floor ~50)`);
     }
     assert.deepEqual(onlyErrors(logs.skip), []);
     assert.deepEqual(onlyErrors(logs.noskip), []);

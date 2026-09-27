@@ -15,6 +15,7 @@ export const MAX_TRAINS = 6;
 export const MAX_AMBIENT = 144;
 export const MAX_COMPS = MAX_TRAINS * N_COMP + MAX_AMBIENT; // 186
 export const TEX_W = 192;                                  // texel columns of the component texture
+export const DETAIL_N = 40;                                // short-wave detail components (shader normals only)
 export const LAB = { W: 600, D: 320 };                     // detection region, centred on the origin
 export const ROGUE_RATIO = 2.0;                            // H_max / H_s threshold
 export const FETCH_M = 60e3;                               // wind fetch used by the JONSWAP fit
@@ -160,6 +161,33 @@ export function buildAmbientComps(U10, windDirDeg, n, fMax, seed = 7) {
   return { comps, fp: ws.fp, Hs: 4 * Math.sqrt(variance) };
 }
 
+// The wind sea's spectrum continued below the mesh's ~16 m cut-off, down to
+// ~0.3 m: log-spaced frequencies (jittered within their bins), directions spread
+// around the wind. The weight smoothstep(0.8·fMax, fMax, f) is the complement of
+// the ambient taper, so mesh and detail together carry the whole spectrum. For
+// an f⁻⁵ tail the slope variance a²k²/2 is equal per octave, so every component
+// adds about the same roughness. These only shade the surface (normals, glints,
+// whitecaps): they neither displace the mesh nor enter H_s or the detector.
+// Returns { comps: [{ k, dx, dy, w, phi, ak }] (ascending f), msSlope: Σ a²k²/2 }.
+export function buildDetailWaves(U10, windDirDeg, fMax = F_MAX, n = DETAIL_N, fTop = 2.3, seed = 11) {
+  const ws = windSea(U10);
+  if (!ws) return { comps: [], msSlope: 0 };
+  const f1 = 0.8 * fMax, r = Math.pow(fTop / f1, 1 / n);
+  const rng = mulberry32(seed);
+  const comps = [];
+  let msSlope = 0;
+  for (let i = 0; i < n; i++) {
+    const lo = f1 * Math.pow(r, i), hi = lo * r;
+    const f = lo * Math.pow(r, 0.1 + 0.8 * rng());
+    const a = Math.sqrt(2 * jonswap(f, ws) * (hi - lo) * smoothstep(0.8 * fMax, fMax, f));
+    const om = TWO_PI * f, k = om * om / G;
+    const th = (windDirDeg + Math.min(Math.max(gaussian(rng) * 32, -90), 90)) * DEG;
+    comps.push({ k, dx: Math.cos(th), dy: Math.sin(th), w: om, phi: rng() * TWO_PI, ak: a * k });
+    msSlope += a * a * k * k / 2;
+  }
+  return { comps, msSlope };
+}
+
 // The compiled component set shared by the CPU (detection, buoy, 2D view) and
 // the GPU (vertex shader via a float texture).
 export class Sea {
@@ -180,6 +208,7 @@ export class Sea {
     this.ambientHs = 0;
     this.Hs = 0;
     this.Q = 0;                  // Gerstner displacement factor (shared by all components)
+    this.detail = { comps: [], msSlope: 0 };
     this.steepness = 0;
   }
 
@@ -201,6 +230,7 @@ export class Sea {
     for (const c of amb.comps) put(c);
     this.ambientFp = amb.fp;
     this.ambientHs = amb.Hs;
+    this.detail = buildDetailWaves(wind, windDir, fMax);
     this.n = n;
 
     let variance = 0, sumAK = 0;

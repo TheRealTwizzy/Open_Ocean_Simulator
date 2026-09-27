@@ -3,8 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  Sea, Detector, scanWaves, defaultTrain, buildTrainComps, rippleEta,
-  QUALITY, RIPPLE, TEX_W, TWO_PI, G, MAX_TRAINS,
+  Sea, Detector, scanWaves, defaultTrain, buildTrainComps, buildDetailWaves, rippleEta,
+  QUALITY, RIPPLE, TEX_W, TWO_PI, G, MAX_TRAINS, DETAIL_N, F_MAX, DEG,
 } from '../../js/physics.js';
 
 const QUALITIES = ['low', 'med', 'high'];
@@ -206,4 +206,46 @@ test('rippleEta: zero once a ripple is older than RIPPLE.LIFE, nonzero on a fres
   close(h, RIPPLE.AMP * Math.exp(-age / 3.5) / Math.sqrt(1 + d / 25), 1e-12, 'crest height on the ring:');
   assert.ok(h > 0.5);
   assert.equal(rippleEta([], 0, 0, 0), 0);
+});
+
+test('short-wave detail: none without wind, DETAIL_N dispersive components above the mesh cut-off otherwise', () => {
+  assert.deepEqual(buildDetailWaves(0, 20), { comps: [], msSlope: 0 });
+  const { comps } = buildDetailWaves(8, 20);
+  assert.equal(comps.length, DETAIL_N);
+  let prevF = 0;
+  for (const c of comps) {
+    const f = c.w / TWO_PI;
+    assert.ok(f > prevF, 'frequencies ascend, so the shader can skip the short end first');
+    prevF = f;
+    close(c.k, c.w * c.w / G, 1e-12, 'k = ω²/g');
+    close(Math.hypot(c.dx, c.dy), 1, 1e-12, 'unit direction');
+    if (f < 0.8 * F_MAX) assert.equal(c.ak, 0, 'below 0.8·F_MAX the mesh carries the spectrum');
+  }
+  assert.ok(prevF < 2.4 && TWO_PI / comps.at(-1).k < 0.35, `shortest wave ~0.3 m (${(TWO_PI / comps.at(-1).k).toFixed(2)} m)`);
+});
+
+test('short-wave detail: roughness grows with the wind, in the range sun-glitter surveys measure', () => {
+  const rms = U => Math.sqrt(buildDetailWaves(U, 20).msSlope);
+  const [r3, r8, r15] = [rms(3), rms(8), rms(15)];
+  assert.ok(r3 < r8 && r8 < r15, `rms slope rises with wind: ${r3.toFixed(3)}, ${r8.toFixed(3)}, ${r15.toFixed(3)}`);
+  // Cox & Munk give ~0.21 at 8 m/s for the whole spectrum, capillaries included;
+  // the 0.3-16 m band here should carry most but not all of it
+  assert.ok(r8 > 0.1 && r8 < 0.21, `rms slope at 8 m/s: ${r8.toFixed(3)}`);
+});
+
+test('short-wave detail: directions spread around the wind heading', () => {
+  for (const heading of [20, -120]) {
+    let sx = 0, sy = 0;
+    for (const c of buildDetailWaves(8, heading).comps) { sx += c.ak * c.dx; sy += c.ak * c.dy; }
+    const mean = Math.atan2(sy, sx) / DEG;
+    const off = ((mean - heading + 540) % 360) - 180;
+    assert.ok(Math.abs(off) < 15, `mean direction ${mean.toFixed(1)}° vs wind ${heading}°`);
+  }
+});
+
+test('the detail layer leaves H_s and the mesh components alone', () => {
+  const s = defaultSea('med');
+  assert.equal(s.detail.comps.length, DETAIL_N);
+  assert.equal(s.Hs.toFixed(3), '2.875');
+  assert.equal(defaultSea('med', { wind: 0 }).detail.comps.length, 0);
 });
