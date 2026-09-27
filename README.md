@@ -6,7 +6,8 @@ focusing). Live at <https://therealtwizzy.github.io/Open_Ocean_Simulator/>.
 
 The ocean is rendered with [Three.js](https://threejs.org/) (vendored, no CDN,
 no build step): the full wave sum runs in the vertex shader, with Gerstner chop,
-analytic normals, sky reflection, sun glint, subsurface glow and foam. Serve the
+analytic normals, sky reflection, sun glint, subsurface glow and foam, and the
+fragment shader adds the wind sea's short waves (down to ~0.3 m) and whitecaps. Serve the
 folder over HTTP (`python3 -m http.server`) — ES modules do not load from
 `file://`.
 
@@ -51,8 +52,14 @@ closes any panel.
   along every row and column. A wave whose crest-to-trough height exceeds
   2·H<sub>s</sub> fires the alert, drops a beacon on the crest as drawn, and
   briefly freezes the simulation at that instant (optional).
-- Crest steepness (Gerstner displacement), foam and splash ripples are visual
-  only and never enter H<sub>s</sub> or the detector.
+- The wind sea's spectrum continues below the mesh's ~16 m in the fragment
+  shader: 40 short dispersive waves down to ~0.3 m, spread around the wind, that
+  shade the surface (no wind, glassy water) and fade once too fine for a pixel,
+  widening the sun's glitter path instead. Whitecaps appear where the local slope
+  passes ~0.3, the linear breaking onset: about 0.5 % of the sea at 8 m/s and
+  4 % at 15, in line with whitecap surveys.
+- Crest steepness (Gerstner displacement), the short waves, foam and splash
+  ripples are visual only and never enter H<sub>s</sub> or the detector.
 
 At the default settings (two trains at 0.15 Hz / 0.11 Hz crossing at 30°,
 bandwidth 20 %, spread 10°, 8 m/s wind) the two groups' refocus periods of
